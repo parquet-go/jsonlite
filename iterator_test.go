@@ -229,3 +229,128 @@ func TestIteratorNestedValue(t *testing.T) {
 		t.Errorf("element 1: expected b=2, got %d", b.Int())
 	}
 }
+
+func TestIteratorObjectSeq(t *testing.T) {
+	input := `{"name": "Alice", "age": 30, "active": true}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	if iter.Kind() != jsonlite.Object {
+		t.Fatalf("expected Object, got %v", iter.Kind())
+	}
+
+	// Use Object() to iterate over fields
+	fields := make(map[string]jsonlite.Kind)
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields[key] = iter.Kind()
+	}
+
+	if len(fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(fields))
+	}
+
+	if fields["name"] != jsonlite.String {
+		t.Errorf("expected name to be String, got %v", fields["name"])
+	}
+	if fields["age"] != jsonlite.Number {
+		t.Errorf("expected age to be Number, got %v", fields["age"])
+	}
+	if fields["active"] != jsonlite.True {
+		t.Errorf("expected active to be True, got %v", fields["active"])
+	}
+}
+
+func TestIteratorArraySeq(t *testing.T) {
+	input := `[1, "two", true, null]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	if iter.Kind() != jsonlite.Array {
+		t.Fatalf("expected Array, got %v", iter.Kind())
+	}
+
+	// Use Array() to iterate over elements
+	expectedKinds := []jsonlite.Kind{jsonlite.Number, jsonlite.String, jsonlite.True, jsonlite.Null}
+	var gotKinds []jsonlite.Kind
+
+	for idx, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if idx != len(gotKinds) {
+			t.Errorf("expected index %d, got %d", len(gotKinds), idx)
+		}
+		gotKinds = append(gotKinds, iter.Kind())
+	}
+
+	if len(gotKinds) != len(expectedKinds) {
+		t.Fatalf("expected %d elements, got %d", len(expectedKinds), len(gotKinds))
+	}
+
+	for i, expected := range expectedKinds {
+		if gotKinds[i] != expected {
+			t.Errorf("element %d: expected %v, got %v", i, expected, gotKinds[i])
+		}
+	}
+}
+
+func TestIteratorNestedObjectArray(t *testing.T) {
+	input := `{"users": [{"name": "Alice"}, {"name": "Bob"}]}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var names []string
+
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key == "users" {
+			if iter.Kind() != jsonlite.Array {
+				t.Fatalf("expected Array for users, got %v", iter.Kind())
+			}
+			for _, err := range iter.Array() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if iter.Kind() != jsonlite.Object {
+					t.Fatalf("expected Object in users array, got %v", iter.Kind())
+				}
+				for k, err := range iter.Object() {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if k == "name" {
+						v, err := iter.Value()
+						if err != nil {
+							t.Fatal(err)
+						}
+						names = append(names, v.String())
+					}
+				}
+			}
+		}
+	}
+
+	if len(names) != 2 {
+		t.Fatalf("expected 2 names, got %d", len(names))
+	}
+	if names[0] != "Alice" {
+		t.Errorf("expected first name 'Alice', got %q", names[0])
+	}
+	if names[1] != "Bob" {
+		t.Errorf("expected second name 'Bob', got %q", names[1])
+	}
+}

@@ -1,6 +1,9 @@
 package jsonlite
 
-import "fmt"
+import (
+	"fmt"
+	"iter"
+)
 
 // Iterator provides a streaming interface for traversing JSON values.
 // It automatically handles control tokens (braces, brackets, colons, commas)
@@ -11,7 +14,6 @@ type Iterator struct {
 	kind   Kind
 	key    string
 	err    error
-	depth  int    // track nesting depth
 	state  []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
 	bytes  [16]byte
 }
@@ -30,7 +32,7 @@ func (it *Iterator) Next() bool {
 		token, ok := it.tokens.Next()
 		if !ok {
 			if len(it.state) > 0 {
-				if it.state[len(it.state)-1] == 'a' {
+				if it.top() == 'a' {
 					it.err = errUnexpectedEndOfArray
 				} else {
 					it.err = errUnexpectedEndOfObject
@@ -40,12 +42,11 @@ func (it *Iterator) Next() bool {
 		}
 
 		if len(it.state) > 0 {
-			s := it.state[len(it.state)-1]
+			s := it.top()
 			switch s {
 			case 'a': // in array, expecting value or ]
 				if token == "]" {
-					it.state = it.state[:len(it.state)-1]
-					it.depth--
+					it.pop()
 					continue
 				}
 				if token == "," {
@@ -53,104 +54,130 @@ func (it *Iterator) Next() bool {
 				}
 			case 'o': // in object, expecting key or }
 				if token == "}" {
-					it.state = it.state[:len(it.state)-1]
-					it.depth--
+					it.pop()
 					continue
 				}
 				if token == "," {
 					continue
 				}
-				// Must be a key
-				if token[0] != '"' {
-					it.err = fmt.Errorf("expected string key, got %q", token)
-					return false
-				}
 				key, err := Unquote(token)
 				if err != nil {
-					it.err = fmt.Errorf("invalid key: %q: %w", token, err)
+					it.setErrorf("invalid key: %q: %w", token, err)
 					return false
 				}
-				it.key = key
-				// Now expect colon
+				it.setKey(key)
 				colon, ok := it.tokens.Next()
 				if !ok {
 					it.err = errUnexpectedEndOfObject
 					return false
 				}
 				if colon != ":" {
-					it.err = fmt.Errorf("expected ':', got %q", colon)
+					it.setErrorf("expected ':', got %q", colon)
 					return false
 				}
 				// Change state to expect value
-				it.state[len(it.state)-1] = 'v'
+				it.set('v')
 				continue
 			case 'v': // in object, expecting value
 				// Change state back to expect key/}
-				it.state[len(it.state)-1] = 'o'
+				it.set('o')
 			}
 		}
 
-		it.token = token
-		switch token[0] {
-		case 'n':
-			if token != "null" {
-				it.err = fmt.Errorf("invalid token: %q", token)
-				return false
-			}
-			it.kind = Null
-		case 't':
-			if token != "true" {
-				it.err = fmt.Errorf("invalid token: %q", token)
-				return false
-			}
-			it.kind = True
-		case 'f':
-			if token != "false" {
-				it.err = fmt.Errorf("invalid token: %q", token)
-				return false
-			}
-			it.kind = False
-		case '"':
-			it.kind = String
-		case '[':
-			it.kind = Array
-			it.state = append(it.state, 'a')
-			it.depth++
-		case '{':
-			it.kind = Object
-			it.state = append(it.state, 'o')
-			it.depth++
-		case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			it.kind = Number
-		default:
-			it.err = fmt.Errorf("invalid token: %q", token)
-			return false
-		}
+		return it.setToken(token)
+	}
+}
 
-		return true
+func (it *Iterator) push(state byte) {
+	it.state = append(it.state, state)
+}
+
+func (it *Iterator) pop() {
+	it.state = it.state[:len(it.state)-1]
+}
+
+func (it *Iterator) top() byte {
+	return it.state[len(it.state)-1]
+}
+
+func (it *Iterator) set(state byte) {
+	it.state[len(it.state)-1] = state
+}
+
+func (it *Iterator) setError(err error) {
+	it.err = err
+}
+
+func (it *Iterator) setErrorf(msg string, args ...any) {
+	it.setError(fmt.Errorf(msg, args...))
+}
+
+func (it *Iterator) setKey(key string) {
+	it.key = key
+}
+
+func (it *Iterator) setToken(token string) bool {
+	kind, err := tokenKind(token)
+	it.token = token
+	it.kind = kind
+	it.err = err
+
+	if err != nil {
+		return false
+	}
+
+	switch kind {
+	case Array:
+		it.push('a')
+	case Object:
+		it.push('o')
+	}
+
+	return true
+}
+
+func tokenKind(token string) (Kind, error) {
+	switch token[0] {
+	case 'n':
+		if token != "null" {
+			return Null, fmt.Errorf("invalid token: %q", token)
+		}
+		return Null, nil
+	case 't':
+		if token != "true" {
+			return Null, fmt.Errorf("invalid token: %q", token)
+		}
+		return True, nil
+	case 'f':
+		if token != "false" {
+			return Null, fmt.Errorf("invalid token: %q", token)
+		}
+		return False, nil
+	case '"':
+		return String, nil
+	case '[':
+		return Array, nil
+	case '{':
+		return Object, nil
+	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return Number, nil
+	default:
+		return Null, fmt.Errorf("invalid token: %q", token)
 	}
 }
 
 // Kind returns the kind of the current value.
-func (it *Iterator) Kind() Kind {
-	return it.kind
-}
+func (it *Iterator) Kind() Kind { return it.kind }
 
 // Key returns the object key for the current value, if inside an object.
 // Returns an empty string if not inside an object or at the top level.
-func (it *Iterator) Key() string {
-	return it.key
-}
+func (it *Iterator) Key() string { return it.key }
 
 // Err returns any error that occurred during iteration.
-func (it *Iterator) Err() error {
-	return it.err
-}
+func (it *Iterator) Err() error { return it.err }
 
 // Depth returns the current nesting depth (0 at top level).
-func (it *Iterator) Depth() int {
-	return it.depth
-}
+func (it *Iterator) Depth() int { return len(it.state) }
 
 // Value parses and returns the current value.
 // For arrays and objects, this consumes all nested tokens and returns the
@@ -178,22 +205,133 @@ func (it *Iterator) Value() (Value, error) {
 	case Array:
 		val, err := parseArray(&it.tokens)
 		if err != nil {
-			it.err = err
+			it.setError(err)
 		}
-		// Pop the array state we pushed when we saw '['
-		it.state = it.state[:len(it.state)-1]
-		it.depth--
+		it.pop()
 		return val, err
 	case Object:
 		val, err := parseObject(&it.tokens)
 		if err != nil {
-			it.err = err
+			it.setError(err)
 		}
-		// Pop the object state we pushed when we saw '{'
-		it.state = it.state[:len(it.state)-1]
-		it.depth--
+		it.pop()
 		return val, err
 	default:
 		return Value{}, fmt.Errorf("unexpected kind: %v", it.kind)
+	}
+}
+
+// Object returns an iterator over the key-value pairs of the current object.
+// The iterator yields the key for each field, and the Iterator is positioned
+// on the field's value. Call Kind(), Value(), Object(), or Array() to process
+// the value.
+//
+// Must only be called when Kind() == Object.
+func (it *Iterator) Object() iter.Seq2[string, error] {
+	return func(yield func(string, error) bool) {
+		for i := 0; ; i++ {
+			token, ok := it.tokens.Next()
+			if !ok {
+				it.setError(errUnexpectedEndOfObject)
+				yield("", it.err)
+				return
+			}
+
+			if token == "}" {
+				it.pop()
+				return
+			}
+
+			if i != 0 {
+				if token != "," {
+					it.setErrorf("expected ',', got %q", token)
+					yield("", it.err)
+					return
+				}
+				token, ok = it.tokens.Next()
+				if !ok {
+					it.setError(errUnexpectedEndOfObject)
+					yield("", it.err)
+					return
+				}
+			}
+
+			key, err := Unquote(token)
+			if err != nil {
+				it.setErrorf("invalid key: %q: %w", token, err)
+				yield("", it.err)
+				return
+			}
+
+			colon, ok := it.tokens.Next()
+			if !ok {
+				it.setError(errUnexpectedEndOfObject)
+				yield("", it.err)
+				return
+			}
+			if colon != ":" {
+				it.setErrorf("expected ':', got %q", colon)
+				yield("", it.err)
+				return
+			}
+
+			value, ok := it.tokens.Next()
+			if !ok {
+				it.setError(errUnexpectedEndOfObject)
+				yield("", it.err)
+				return
+			}
+
+			it.setKey(key)
+			it.setToken(value)
+
+			if !yield(key, nil) {
+				return
+			}
+		}
+	}
+}
+
+// Array returns an iterator over the elements of the current array.
+// The iterator yields the index for each element, and the Iterator is
+// positioned on the element's value. Call Kind(), Value(), Object(), or
+// Array() to process the value.
+//
+// Must only be called when Kind() == Array.
+func (it *Iterator) Array() iter.Seq2[int, error] {
+	return func(yield func(int, error) bool) {
+		for i := 0; ; i++ {
+			token, ok := it.tokens.Next()
+			if !ok {
+				it.setError(errUnexpectedEndOfArray)
+				yield(i, it.err)
+				return
+			}
+
+			if token == "]" {
+				it.pop()
+				return
+			}
+
+			if i != 0 {
+				if token != "," {
+					it.setErrorf("expected ',', got %q", token)
+					yield(i, it.err)
+					return
+				}
+				token, ok = it.tokens.Next()
+				if !ok {
+					it.setError(errUnexpectedEndOfArray)
+					yield(i, it.err)
+					return
+				}
+			}
+
+			it.setToken(token)
+
+			if !yield(i, nil) {
+				return
+			}
+		}
 	}
 }

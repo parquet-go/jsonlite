@@ -154,7 +154,7 @@ func parseArray(tokens *Tokenizer) (Value, error) {
 
 		v, err := parseTokens(tokens)
 		if err != nil {
-			if i == 0 && errors.Is(err, errEndOfArray) {
+			if i == 0 && err == errEndOfArray {
 				return makeArrayValue(elements), nil
 			}
 			return Value{}, err
@@ -169,29 +169,24 @@ func parseObject(tokens *Tokenizer) (Value, error) {
 	fields := make([]Field, 0, 8)
 
 	for i := 0; ; i++ {
-		if i != 0 {
-			token, ok := tokens.Next()
-			if !ok {
-				return Value{}, errUnexpectedEndOfObject
-			}
-			if token == "}" {
-				break
-			}
-			if token != "," {
-				return Value{}, fmt.Errorf("expected ',' or '}', got %q", token)
-			}
-		}
-
 		token, ok := tokens.Next()
 		if !ok {
 			return Value{}, errUnexpectedEndOfObject
 		}
-		if i == 0 && token == "}" {
-			return makeObjectValue(fields), nil
+		if token == "}" {
+			break
 		}
-		if token[0] != '"' {
-			return Value{}, fmt.Errorf("expected string key, got %q", token)
+
+		if i != 0 {
+			if token != "," {
+				return Value{}, fmt.Errorf("expected ',' or '}', got %q", token)
+			}
+			token, ok = tokens.Next()
+			if !ok {
+				return Value{}, errUnexpectedEndOfObject
+			}
 		}
+
 		key, err := Unquote(token)
 		if err != nil {
 			return Value{}, fmt.Errorf("invalid key: %q: %w", token, err)
