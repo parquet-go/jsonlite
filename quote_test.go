@@ -179,6 +179,55 @@ func TestQuoteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestQuoteUnquoteMultipleLevels(t *testing.T) {
+	// Test that applying Quote multiple times produces different outputs each time,
+	// and applying Unquote the same number of times recovers the original.
+	inputs := []string{
+		`{"name":"test","value":42}`,
+		`{"message":"Hello, \"World\"!"}`,
+		`{"path":"C:\\Users\\test"}`,
+		`{"multiline":"line1\nline2\nline3"}`,
+		`{"nested":{"a":1,"b":2}}`,
+		`["item1","item2","item3"]`,
+		`{"special":"\t\r\n"}`,
+	}
+
+	for _, original := range inputs {
+		t.Run(original[:min(20, len(original))], func(t *testing.T) {
+			const levels = 5
+
+			// Apply Quote multiple times, verify each level is different
+			values := make([]string, levels+1)
+			values[0] = original
+
+			for i := 1; i <= levels; i++ {
+				values[i] = Quote(values[i-1])
+				if values[i] == values[i-1] {
+					t.Errorf("Quote level %d produced same output as level %d: %q", i, i-1, values[i])
+				}
+			}
+
+			// Apply Unquote the same number of times
+			current := values[levels]
+			for i := levels; i >= 1; i-- {
+				unquoted, err := Unquote(current)
+				if err != nil {
+					t.Fatalf("Unquote at level %d failed: %v (input: %q)", i, err, current)
+				}
+				if unquoted != values[i-1] {
+					t.Errorf("Unquote at level %d: got %q, want %q", i, unquoted, values[i-1])
+				}
+				current = unquoted
+			}
+
+			// Verify we're back to the original
+			if current != original {
+				t.Errorf("After %d Quote/Unquote cycles: got %q, want %q", levels, current, original)
+			}
+		})
+	}
+}
+
 func TestEscapeIndex(t *testing.T) {
 	tests := []struct {
 		input string
