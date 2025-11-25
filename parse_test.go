@@ -213,6 +213,49 @@ func TestParseError(t *testing.T) {
 	}
 }
 
+func BenchmarkTokenize(b *testing.B) {
+	benchmarks := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "short_string",
+			input: `"hello"`,
+		},
+		{
+			name:  "medium_string",
+			input: `"hello world foo bar"`,
+		},
+		{
+			name:  "long_string",
+			input: `"The quick brown fox jumps over the lazy dog and runs away"`,
+		},
+		{
+			name:  "string_with_escapes",
+			input: `"hello \"world\" foo\nbar"`,
+		},
+		{
+			name:  "many_short_strings",
+			input: `["a","b","c","d","e","f","g","h","i","j"]`,
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			b.SetBytes(int64(len(bm.input)))
+			for b.Loop() {
+				tok := jsonlite.Tokenize(bm.input)
+				for {
+					_, ok := tok.Next()
+					if !ok {
+						break
+					}
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkParse(b *testing.B) {
 	benchmarks := []struct {
 		name  string

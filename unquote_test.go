@@ -304,3 +304,89 @@ func TestUnquoteInvalid(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkUnquote(b *testing.B) {
+	inputs := []struct {
+		name  string
+		value string
+	}{
+		{"empty", `""`},
+		{"short", `"hello"`},
+		{"medium", `"The quick brown fox jumps over the lazy dog"`},
+		{"with_escapes", `"Hello, \"World\"!\nHow are you?"`},
+		{"unicode", `"Hello \u0048\u0065\u006c\u006c\u006f"`},
+		{"long_no_escape", func() string {
+			s := make([]byte, 1024)
+			for i := range s {
+				s[i] = 'a'
+			}
+			return `"` + string(s) + `"`
+		}()},
+		{"long_with_escape", func() string {
+			s := make([]byte, 1024)
+			for i := range s {
+				if i%100 == 0 {
+					s[i] = '\\'
+				} else if i%100 == 1 {
+					s[i] = 'n'
+				} else {
+					s[i] = 'a'
+				}
+			}
+			return `"` + string(s) + `"`
+		}()},
+	}
+
+	for _, input := range inputs {
+		b.Run(input.name, func(b *testing.B) {
+			b.SetBytes(int64(len(input.value)))
+			for i := 0; i < b.N; i++ {
+				_, _ = jsonlite.Unquote(input.value)
+			}
+		})
+	}
+}
+
+func BenchmarkAppendUnquote(b *testing.B) {
+	inputs := []struct {
+		name  string
+		value string
+	}{
+		{"empty", `""`},
+		{"short", `"hello"`},
+		{"medium", `"The quick brown fox jumps over the lazy dog"`},
+		{"with_escapes", `"Hello, \"World\"!\nHow are you?"`},
+		{"unicode", `"Hello \u0048\u0065\u006c\u006c\u006f"`},
+		{"long_no_escape", func() string {
+			s := make([]byte, 1024)
+			for i := range s {
+				s[i] = 'a'
+			}
+			return `"` + string(s) + `"`
+		}()},
+		{"long_with_escape", func() string {
+			s := make([]byte, 1024)
+			for i := range s {
+				if i%100 == 0 {
+					s[i] = '\\'
+				} else if i%100 == 1 {
+					s[i] = 'n'
+				} else {
+					s[i] = 'a'
+				}
+			}
+			return `"` + string(s) + `"`
+		}()},
+	}
+
+	for _, input := range inputs {
+		b.Run(input.name, func(b *testing.B) {
+			buf := make([]byte, 0, 2048)
+			b.SetBytes(int64(len(input.value)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				buf, _ = jsonlite.AppendUnquote(buf[:0], input.value)
+			}
+		})
+	}
+}

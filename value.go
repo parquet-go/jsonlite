@@ -276,10 +276,10 @@ func (v *Value) Append(buf []byte) []byte {
 		return append(buf, "false"...)
 
 	case Number:
-		return strconv.AppendFloat(buf, v.Float(), 'g', -1, 64)
+		return append(buf, v.raw()...)
 
 	case String:
-		return strconv.AppendQuote(buf, v.String())
+		return AppendQuote(buf, v.String())
 
 	case Array:
 		buf = append(buf, '[')
@@ -299,7 +299,7 @@ func (v *Value) Append(buf []byte) []byte {
 			if i > 0 {
 				buf = append(buf, ',')
 			}
-			buf = strconv.AppendQuote(buf, fields[i].Key)
+			buf = AppendQuote(buf, fields[i].Key)
 			buf = append(buf, ':')
 			buf = fields[i].Val.Append(buf)
 		}

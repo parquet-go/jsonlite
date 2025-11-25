@@ -14,6 +14,65 @@ var (
 	errUnexpectedEndOfArray  = errors.New("unexpected end of array")
 )
 
+// isValidNumber checks if a string is a valid JSON number.
+// JSON numbers: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
+func isValidNumber(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	i := 0
+
+	// Optional minus sign
+	if s[i] == '-' {
+		i++
+		if i >= len(s) {
+			return false
+		}
+	}
+
+	// Integer part
+	if s[i] == '0' {
+		i++
+	} else if s[i] >= '1' && s[i] <= '9' {
+		i++
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	} else {
+		return false
+	}
+
+	// Fractional part
+	if i < len(s) && s[i] == '.' {
+		i++
+		if i >= len(s) || s[i] < '0' || s[i] > '9' {
+			return false
+		}
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	// Exponent part
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i >= len(s) {
+			return false
+		}
+		if s[i] == '+' || s[i] == '-' {
+			i++
+		}
+		if i >= len(s) || s[i] < '0' || s[i] > '9' {
+			return false
+		}
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	return i == len(s)
+}
+
 // Tokenizer is a JSON tokenizer that splits input into tokens.
 // It skips whitespace and returns individual JSON tokens one at a time.
 type Tokenizer struct {
@@ -32,23 +91,27 @@ func (t *Tokenizer) Next() (token string, ok bool) {
 	s := t.json
 	i := t.offset
 
-skipSpaces:
-	for i < len(s) {
-		switch s[i] {
-		case ' ', '\t', '\n', '\r':
-			i++
-		default:
-			break skipSpaces
-		}
-	}
-
 	if i == len(s) {
 		return
 	}
 
+	if s[i] <= 0x20 { // whitespace?
+	skipSpaces:
+		for {
+			if i == len(s) {
+				return
+			}
+			switch s[i] {
+			case ' ', '\t', '\n', '\r':
+				i++
+			default:
+				break skipSpaces
+			}
+		}
+	}
+
 	j := i + 1
 	switch s[i] {
-	case '[', ']', '{', '}', ':', ',':
 	case '"':
 		for {
 			k := strings.IndexByte(s[j:], '"')
@@ -63,6 +126,7 @@ skipSpaces:
 				break
 			}
 		}
+	case ',', ':', '[', ']', '{', '}':
 	default:
 		for j < len(s) {
 			switch s[j] {
@@ -79,16 +143,16 @@ skipSpaces:
 }
 
 // Parse parses JSON data and returns a pointer to the root Value.
-// Returns an error if the JSON is malformed.
+// Returns an error if the JSON is malformed or empty.
 func Parse(data string) (*Value, error) {
-	if len(data) == 0 {
-		v := makeNullValue()
-		return &v, nil
-	}
 	tok := Tokenize(data)
 	v, err := parseTokens(tok)
 	if err != nil {
 		return nil, err
+	}
+	// Check for trailing content after the root value
+	if extra, ok := tok.Next(); ok {
+		return nil, fmt.Errorf("unexpected token after root value: %q", extra)
 	}
 	return &v, nil
 }
@@ -129,6 +193,9 @@ func parseTokens(tokens *Tokenizer) (Value, error) {
 	case '}':
 		return Value{}, errEndOfObject
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		if !isValidNumber(token) {
+			return Value{}, fmt.Errorf("invalid number: %q", token)
+		}
 		return makeNumberValue(token), nil
 	default:
 		return Value{}, fmt.Errorf("invalid token: %q", token)
@@ -154,8 +221,18 @@ func parseArray(tokens *Tokenizer) (Value, error) {
 
 		v, err := parseTokens(tokens)
 		if err != nil {
+			// Only treat errEndOfArray as "empty array" if this is the first element
+			// AND we actually saw the ] token directly (not via a nested parse error).
+			// Since parseTokens returns errEndOfArray only when it directly sees ],
+			// and nested arrays that fail return their own errors, we need to check
+			// that err is exactly errEndOfArray and i == 0.
 			if i == 0 && err == errEndOfArray {
 				return makeArrayValue(elements), nil
+			}
+			// For trailing comma cases like [1,], we get errEndOfArray from parseTokens
+			// seeing ] after the comma - this is an error
+			if err == errEndOfArray {
+				return Value{}, fmt.Errorf("unexpected ']' after ','")
 			}
 			return Value{}, err
 		}
