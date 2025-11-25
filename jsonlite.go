@@ -288,52 +288,68 @@ func makeObjectValue(fields []Field) Value {
 	}
 }
 
-type tokenizer struct {
+// Tokenizer is a JSON tokenizer that splits input into tokens.
+// It skips whitespace and returns individual JSON tokens one at a time.
+type Tokenizer struct {
 	json   string
 	offset int
 }
 
-func (t *tokenizer) next() (token string, ok bool) {
-	for t.offset < len(t.json) {
-		i := t.offset
-		j := i + 1
-		switch t.json[i] {
+// Tokenize creates a new Tokenizer for the given JSON string.
+func Tokenize(json string) *Tokenizer {
+	return &Tokenizer{json: json}
+}
+
+// Next returns the next token from the input.
+// Returns an empty string and false when there are no more tokens.
+func (t *Tokenizer) Next() (token string, ok bool) {
+	s := t.json
+	i := t.offset
+
+skipSpaces:
+	for i < len(s) {
+		switch s[i] {
 		case ' ', '\t', '\n', '\r':
-			t.offset++
-			continue
-		case '[', ']', '{', '}', ':', ',':
-			t.offset = j
-			return t.json[i:j], true
-		case '"':
-			for {
-				k := strings.IndexByte(t.json[j:], '"')
-				if k < 0 {
-					j = len(t.json)
-					break
-				}
-				j += k + 1
-				for k = j - 2; k > i && t.json[k] == '\\'; k-- {
-				}
-				if (j-k)%2 == 0 {
-					break
-				}
-			}
-			t.offset = j
-			return t.json[i:j], true
+			i++
 		default:
-			for j < len(t.json) {
-				switch t.json[j] {
-				case ' ', '\t', '\n', '\r', '[', ']', '{', '}', ':', ',', '"':
-					t.offset = j
-					return t.json[i:j], true
-				}
-				j++
-			}
-			t.offset = j
-			return t.json[i:j], true
+			break skipSpaces
 		}
 	}
-	return "", false
+
+	if i == len(s) {
+		return
+	}
+
+	j := i + 1
+	switch s[i] {
+	case '[', ']', '{', '}', ':', ',':
+	case '"':
+		for {
+			k := strings.IndexByte(s[j:], '"')
+			if k < 0 {
+				j = len(s)
+				break
+			}
+			j += k + 1
+			for k = j - 2; k > i && s[k] == '\\'; k-- {
+			}
+			if (j-k)%2 == 0 {
+				break
+			}
+		}
+	default:
+		for j < len(s) {
+			switch s[j] {
+			case ' ', '\t', '\n', '\r', '[', ']', '{', '}', ':', ',', '"':
+				t.offset = j
+				return s[i:j], true
+			}
+			j++
+		}
+	}
+
+	t.offset = j
+	return s[i:j], true
 }
 
 // Parse parses JSON data and returns a pointer to the root Value.
@@ -343,7 +359,7 @@ func Parse(data string) (*Value, error) {
 		v := makeNullValue()
 		return &v, nil
 	}
-	tok := &tokenizer{json: data}
+	tok := Tokenize(data)
 	v, err := parseTokens(tok)
 	if err != nil {
 		return nil, err
@@ -351,8 +367,8 @@ func Parse(data string) (*Value, error) {
 	return &v, nil
 }
 
-func parseTokens(tokens *tokenizer) (Value, error) {
-	token, ok := tokens.next()
+func parseTokens(tokens *Tokenizer) (Value, error) {
+	token, ok := tokens.Next()
 	if !ok {
 		return Value{}, errUnexpectedEndOfObject
 	}
@@ -393,12 +409,12 @@ func parseTokens(tokens *tokenizer) (Value, error) {
 	}
 }
 
-func parseArray(tokens *tokenizer) (Value, error) {
+func parseArray(tokens *Tokenizer) (Value, error) {
 	elements := make([]Value, 0, 8)
 
 	for i := 0; ; i++ {
 		if i != 0 {
-			token, ok := tokens.next()
+			token, ok := tokens.Next()
 			if !ok {
 				return Value{}, errUnexpectedEndOfArray
 			}
@@ -423,12 +439,12 @@ func parseArray(tokens *tokenizer) (Value, error) {
 	return makeArrayValue(elements), nil
 }
 
-func parseObject(tokens *tokenizer) (Value, error) {
+func parseObject(tokens *Tokenizer) (Value, error) {
 	fields := make([]Field, 0, 8)
 
 	for i := 0; ; i++ {
 		if i != 0 {
-			token, ok := tokens.next()
+			token, ok := tokens.Next()
 			if !ok {
 				return Value{}, errUnexpectedEndOfObject
 			}
@@ -440,7 +456,7 @@ func parseObject(tokens *tokenizer) (Value, error) {
 			}
 		}
 
-		token, ok := tokens.next()
+		token, ok := tokens.Next()
 		if !ok {
 			return Value{}, errUnexpectedEndOfObject
 		}
@@ -455,7 +471,7 @@ func parseObject(tokens *tokenizer) (Value, error) {
 			return Value{}, fmt.Errorf("invalid key: %q: %w", token, err)
 		}
 
-		token, ok = tokens.next()
+		token, ok = tokens.Next()
 		if !ok {
 			return Value{}, errUnexpectedEndOfObject
 		}
