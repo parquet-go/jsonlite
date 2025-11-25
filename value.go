@@ -1,0 +1,311 @@
+package jsonlite
+
+import (
+	"encoding/json"
+	"slices"
+	"strconv"
+	"strings"
+	"unsafe"
+)
+
+const (
+	// kindShift is calculated based on pointer size to use the high bits
+	// for the kind field. We have 7 Kind values (0-6), requiring 3 bits.
+	// On 64-bit systems this is 61 (top 3 bits for kind, bottom 61 for length),
+	// on 32-bit systems this is 29 (top 3 bits for kind, bottom 29 for length).
+	kindShift = (unsafe.Sizeof(uintptr(0))*8 - 3)
+	kindMask  = (1 << kindShift) - 1
+)
+
+// Kind represents the type of a JSON value.
+type Kind int
+
+const (
+	// Null represents a JSON null value.
+	Null Kind = iota
+	// True represents a JSON true boolean value.
+	True
+	// False represents a JSON false boolean value.
+	False
+	// Number represents a JSON number value.
+	Number
+	// String represents a JSON string value.
+	String
+	// Object represents a JSON object value.
+	Object
+	// Array represents a JSON array value.
+	Array
+)
+
+// Field represents a key-value pair in a JSON object.
+type Field struct {
+	Key string
+	Val Value
+}
+
+// Value represents a JSON value of any type.
+type Value struct {
+	p unsafe.Pointer
+	n uintptr
+}
+
+// Kind returns the type of the JSON value.
+func (v *Value) Kind() Kind {
+	return Kind(v.n >> kindShift)
+}
+
+// Len returns the length of the value.
+// For strings, it returns the number of bytes.
+// For arrays, it returns the number of elements.
+// For objects, it returns the number of fields.
+// Panics if called on other types.
+func (v *Value) Len() int {
+	switch v.Kind() {
+	case String, Number, Array, Object:
+		return int(v.n & kindMask)
+	default:
+		panic("jsonlite: Len called on non-string/array/object value")
+	}
+}
+
+// Int returns the value as a signed 64-bit integer.
+// Panics if the value is not a number or if parsing fails.
+func (v *Value) Int() int64 {
+	if v.Kind() != Number {
+		panic("jsonlite: Int called on non-number value")
+	}
+	i, err := strconv.ParseInt(v.raw(), 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
+
+// Uint returns the value as an unsigned 64-bit integer.
+// Panics if the value is not a number or if parsing fails.
+func (v *Value) Uint() uint64 {
+	if v.Kind() != Number {
+		panic("jsonlite: Uint called on non-number value")
+	}
+	u, err := strconv.ParseUint(v.raw(), 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}
+
+// Float returns the value as a 64-bit floating point number.
+// Panics if the value is not a number or if parsing fails.
+func (v *Value) Float() float64 {
+	if v.Kind() != Number {
+		panic("jsonlite: Float called on non-number value")
+	}
+	f, err := strconv.ParseFloat(v.raw(), 64)
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+
+// String returns the value as a string.
+// For string and number values, returns the raw value.
+// For other types, returns the JSON representation.
+func (v *Value) String() string {
+	switch v.Kind() {
+	case String, Number:
+		return v.raw()
+	case Null:
+		return "null"
+	case True:
+		return "true"
+	case False:
+		return "false"
+	default:
+		return string(v.Append(nil))
+	}
+}
+
+// Array returns the value as a slice of Values.
+// Panics if the value is not an array.
+func (v *Value) Array() []Value {
+	if v.Kind() != Array {
+		panic("jsonlite: Array called on non-array value")
+	}
+	return unsafe.Slice((*Value)(v.p), v.len())
+}
+
+// Object returns the value as a slice of Fields.
+// Panics if the value is not an object.
+func (v *Value) Object() []Field {
+	if v.Kind() != Object {
+		panic("jsonlite: Object called on non-object value")
+	}
+	return unsafe.Slice((*Field)(v.p), v.len())
+}
+
+// Lookup searches for a field by key in an object and returns a pointer to its value.
+// Returns nil if the key is not found.
+// Panics if the value is not an object.
+func (v *Value) Lookup(k string) *Value {
+	if v.Kind() != Object {
+		panic("jsonlite: Lookup called on non-object value")
+	}
+	fields := v.Object()
+	i, ok := slices.BinarySearchFunc(fields, k, func(a Field, b string) int {
+		return strings.Compare(a.Key, b)
+	})
+	if ok {
+		return &fields[i].Val
+	}
+	return nil
+}
+
+// NumberType returns the classification of the number (int, uint, or float).
+// Panics if the value is not a number.
+func (v *Value) NumberType() NumberType {
+	if v.Kind() != Number {
+		panic("jsonlite: NumberType called on non-number value")
+	}
+	return NumberTypeOf(v.raw())
+}
+
+// Number returns the value as a json.Number.
+// Panics if the value is not a number.
+func (v *Value) Number() json.Number {
+	if v.Kind() != Number {
+		panic("jsonlite: Number called on non-number value")
+	}
+	return json.Number(v.raw())
+}
+
+// raw returns the underlying string data without type checking.
+// This is used internally by methods that have already verified the type.
+func (v *Value) raw() string {
+	return unsafe.String((*byte)(v.p), v.len())
+}
+
+// len returns the length stored in the value without type checking.
+func (v *Value) len() int {
+	return int(v.n & kindMask)
+}
+
+// NumberType represents the classification of a JSON number.
+type NumberType int
+
+const (
+	// Int indicates a signed integer number (has a leading minus sign, no decimal point or exponent).
+	Int NumberType = iota
+	// Uint indicates an unsigned integer number (no minus sign, no decimal point or exponent).
+	Uint
+	// Float indicates a floating point number (has decimal point or exponent).
+	Float
+)
+
+// NumberTypeOf returns the classification of a number string.
+func NumberTypeOf(s string) NumberType {
+	if len(s) == 0 {
+		return Float
+	}
+	t := Uint
+	if s[0] == '-' {
+		s = s[1:]
+		t = Int
+	}
+	for i := range len(s) {
+		switch s[i] {
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			continue
+		default:
+			return Float
+		}
+	}
+	return t
+}
+
+func makeNullValue() Value {
+	return Value{n: uintptr(Null) << kindShift}
+}
+
+func makeTrueValue() Value {
+	return Value{n: uintptr(True)<<kindShift | 1}
+}
+
+func makeFalseValue() Value {
+	return Value{n: uintptr(False)<<kindShift | 0}
+}
+
+func makeNumberValue(s string) Value {
+	return Value{
+		p: unsafe.Pointer(unsafe.StringData(s)),
+		n: (uintptr(Number) << kindShift) | uintptr(len(s)),
+	}
+}
+
+func makeStringValue(s string) Value {
+	return Value{
+		p: unsafe.Pointer(unsafe.StringData(s)),
+		n: (uintptr(String) << kindShift) | uintptr(len(s)),
+	}
+}
+
+func makeArrayValue(elements []Value) Value {
+	return Value{
+		p: unsafe.Pointer(unsafe.SliceData(elements)),
+		n: (uintptr(Array) << kindShift) | uintptr(len(elements)),
+	}
+}
+
+func makeObjectValue(fields []Field) Value {
+	return Value{
+		p: unsafe.Pointer(unsafe.SliceData(fields)),
+		n: (uintptr(Object) << kindShift) | uintptr(len(fields)),
+	}
+}
+
+// Append serializes the Value to JSON and appends it to the buffer.
+// Returns the extended buffer.
+func (v *Value) Append(buf []byte) []byte {
+	switch v.Kind() {
+	case Null:
+		return append(buf, "null"...)
+
+	case True:
+		return append(buf, "true"...)
+
+	case False:
+		return append(buf, "false"...)
+
+	case Number:
+		return strconv.AppendFloat(buf, v.Float(), 'g', -1, 64)
+
+	case String:
+		return strconv.AppendQuote(buf, v.String())
+
+	case Array:
+		buf = append(buf, '[')
+		array := v.Array()
+		for i := range array {
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			buf = array[i].Append(buf)
+		}
+		return append(buf, ']')
+
+	case Object:
+		buf = append(buf, '{')
+		fields := v.Object()
+		for i := range fields {
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			buf = strconv.AppendQuote(buf, fields[i].Key)
+			buf = append(buf, ':')
+			buf = fields[i].Val.Append(buf)
+		}
+		return append(buf, '}')
+
+	default:
+		return buf
+	}
+}
