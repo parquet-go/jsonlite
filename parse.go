@@ -203,7 +203,7 @@ func parseTokens(tokens *Tokenizer) (Value, error) {
 }
 
 func parseArray(tokens *Tokenizer) (Value, error) {
-	elements := make([]Value, 0, 8)
+	var elements []Value
 
 	for i := 0; ; i++ {
 		if i != 0 {
@@ -236,6 +236,10 @@ func parseArray(tokens *Tokenizer) (Value, error) {
 			}
 			return Value{}, err
 		}
+
+		if cap(elements) == 0 {
+			elements = make([]Value, 0, 8)
+		}
 		elements = append(elements, v)
 	}
 
@@ -243,7 +247,7 @@ func parseArray(tokens *Tokenizer) (Value, error) {
 }
 
 func parseObject(tokens *Tokenizer) (Value, error) {
-	fields := make([]Field, 0, 8)
+	var fields []field
 
 	for i := 0; ; i++ {
 		token, ok := tokens.Next()
@@ -281,11 +285,14 @@ func parseObject(tokens *Tokenizer) (Value, error) {
 		if err != nil {
 			return Value{}, fmt.Errorf("%q → %w", key, err)
 		}
-		fields = append(fields, Field{Key: key, Val: val})
+		if cap(fields) == 0 {
+			fields = make([]field, 0, 8)
+		}
+		fields = append(fields, field{k: key, v: val})
 	}
 
-	slices.SortFunc(fields, func(a, b Field) int {
-		return strings.Compare(a.Key, b.Key)
+	slices.SortFunc(fields, func(a, b field) int {
+		return strings.Compare(a.k, b.k)
 	})
 
 	return makeObjectValue(fields), nil

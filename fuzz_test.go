@@ -206,12 +206,13 @@ func compareValues(t *testing.T, input string, std any, val *jsonlite.Value) {
 		if val.Kind() != jsonlite.Array {
 			t.Errorf("input %q: expected Array, got %v", input, val.Kind())
 		} else {
-			arr := val.Array()
-			if len(arr) != len(v) {
-				t.Errorf("input %q: array length mismatch: got %d, want %d", input, len(arr), len(v))
+			if val.Len() != len(v) {
+				t.Errorf("input %q: array length mismatch: got %d, want %d", input, val.Len(), len(v))
 			} else {
-				for i := range v {
-					compareValues(t, input, v[i], &arr[i])
+				i := 0
+				for elem := range val.Array() {
+					compareValues(t, input, v[i], elem)
+					i++
 				}
 			}
 		}
@@ -219,7 +220,6 @@ func compareValues(t *testing.T, input string, std any, val *jsonlite.Value) {
 		if val.Kind() != jsonlite.Object {
 			t.Errorf("input %q: expected Object, got %v", input, val.Kind())
 		} else {
-			fields := val.Object()
 			// Skip detailed comparison if input has invalid UTF-8
 			// stdlib normalizes keys, jsonlite preserves raw bytes
 			if !utf8.ValidString(input) {
@@ -227,15 +227,15 @@ func compareValues(t *testing.T, input string, std any, val *jsonlite.Value) {
 			}
 			// Note: jsonlite keeps duplicate keys, stdlib uses last-wins
 			// Skip comparison if there are duplicate keys (different behavior)
-			if len(fields) != len(v) {
+			if val.Len() != len(v) {
 				return
 			}
-			for _, f := range fields {
-				stdField, ok := v[f.Key]
+			for key, fieldVal := range val.Object() {
+				stdField, ok := v[key]
 				if !ok {
-					t.Errorf("input %q: unexpected field %q", input, f.Key)
+					t.Errorf("input %q: unexpected field %q", input, key)
 				} else {
-					compareValues(t, input, stdField, &f.Val)
+					compareValues(t, input, stdField, fieldVal)
 				}
 			}
 		}

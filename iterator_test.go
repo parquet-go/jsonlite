@@ -204,9 +204,14 @@ func TestIteratorNestedValue(t *testing.T) {
 		t.Fatalf("expected Array value, got %v", val.Kind())
 	}
 
-	arr := val.Array()
-	if len(arr) != 2 {
-		t.Fatalf("expected 2 elements, got %d", len(arr))
+	if val.Len() != 2 {
+		t.Fatalf("expected 2 elements, got %d", val.Len())
+	}
+
+	// Collect array elements
+	var arr []*jsonlite.Value
+	for v := range val.Array() {
+		arr = append(arr, v)
 	}
 
 	// Check first object

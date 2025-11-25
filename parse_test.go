@@ -160,42 +160,29 @@ func TestParseNested(t *testing.T) {
 		t.Fatalf("expected Object, got %v", val.Kind())
 	}
 
-	fields := val.Object()
-	if len(fields) != 5 {
-		t.Fatalf("expected 5 fields, got %d", len(fields))
+	if val.Len() != 5 {
+		t.Fatalf("expected 5 fields, got %d", val.Len())
 	}
 
 	// Check "tags" array
-	var tagsField *jsonlite.Field
-	for i := range fields {
-		if fields[i].Key == "tags" {
-			tagsField = &fields[i]
-			break
-		}
-	}
-	if tagsField == nil {
+	tagsVal := val.Lookup("tags")
+	if tagsVal == nil {
 		t.Fatal("tags field not found")
 	}
-	if tagsField.Val.Kind() != jsonlite.Array {
-		t.Fatalf("tags: expected Array, got %v", tagsField.Val.Kind())
+	if tagsVal.Kind() != jsonlite.Array {
+		t.Fatalf("tags: expected Array, got %v", tagsVal.Kind())
 	}
-	if tagsField.Val.Len() != 3 {
-		t.Fatalf("tags: expected length 3, got %d", tagsField.Val.Len())
+	if tagsVal.Len() != 3 {
+		t.Fatalf("tags: expected length 3, got %d", tagsVal.Len())
 	}
 
 	// Check "metadata" object
-	var metadataField *jsonlite.Field
-	for i := range fields {
-		if fields[i].Key == "metadata" {
-			metadataField = &fields[i]
-			break
-		}
-	}
-	if metadataField == nil {
+	metadataVal := val.Lookup("metadata")
+	if metadataVal == nil {
 		t.Fatal("metadata field not found")
 	}
-	if metadataField.Val.Kind() != jsonlite.Object {
-		t.Fatalf("metadata: expected Object, got %v", metadataField.Val.Kind())
+	if metadataVal.Kind() != jsonlite.Object {
+		t.Fatalf("metadata: expected Object, got %v", metadataVal.Kind())
 	}
 }
 

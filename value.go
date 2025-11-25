@@ -2,6 +2,7 @@ package jsonlite
 
 import (
 	"encoding/json"
+	"iter"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,16 +38,15 @@ const (
 	Array
 )
 
-// Field represents a key-value pair in a JSON object.
-type Field struct {
-	Key string
-	Val Value
-}
-
 // Value represents a JSON value of any type.
 type Value struct {
 	p unsafe.Pointer
 	n uintptr
+}
+
+type field struct {
+	k string
+	v Value
 }
 
 // Kind returns the type of the JSON value.
@@ -127,20 +127,34 @@ func (v *Value) String() string {
 
 // Array returns the value as a slice of Values.
 // Panics if the value is not an array.
-func (v *Value) Array() []Value {
+func (v *Value) Array() iter.Seq[*Value] {
 	if v.Kind() != Array {
 		panic("jsonlite: Array called on non-array value")
 	}
-	return unsafe.Slice((*Value)(v.p), v.len())
+	return func(yield func(*Value) bool) {
+		elems := unsafe.Slice((*Value)(v.p), v.len())
+		for i := range elems {
+			if !yield(&elems[i]) {
+				return
+			}
+		}
+	}
 }
 
-// Object returns the value as a slice of Fields.
+// Object returns the value as a slice of key/value pairs.
 // Panics if the value is not an object.
-func (v *Value) Object() []Field {
+func (v *Value) Object() iter.Seq2[string, *Value] {
 	if v.Kind() != Object {
 		panic("jsonlite: Object called on non-object value")
 	}
-	return unsafe.Slice((*Field)(v.p), v.len())
+	return func(yield func(string, *Value) bool) {
+		fields := unsafe.Slice((*field)(v.p), v.len())
+		for i := range fields {
+			if !yield(fields[i].k, &fields[i].v) {
+				return
+			}
+		}
+	}
 }
 
 // Lookup searches for a field by key in an object and returns a pointer to its value.
@@ -150,12 +164,12 @@ func (v *Value) Lookup(k string) *Value {
 	if v.Kind() != Object {
 		panic("jsonlite: Lookup called on non-object value")
 	}
-	fields := v.Object()
-	i, ok := slices.BinarySearchFunc(fields, k, func(a Field, b string) int {
-		return strings.Compare(a.Key, b)
+	fields := unsafe.Slice((*field)(v.p), v.len())
+	i, ok := slices.BinarySearchFunc(fields, k, func(a field, b string) int {
+		return strings.Compare(a.k, b)
 	})
 	if ok {
-		return &fields[i].Val
+		return &fields[i].v
 	}
 	return nil
 }
@@ -255,7 +269,7 @@ func makeArrayValue(elements []Value) Value {
 	}
 }
 
-func makeObjectValue(fields []Field) Value {
+func makeObjectValue(fields []field) Value {
 	return Value{
 		p: unsafe.Pointer(unsafe.SliceData(fields)),
 		n: (uintptr(Object) << kindShift) | uintptr(len(fields)),
@@ -283,25 +297,27 @@ func (v *Value) Append(buf []byte) []byte {
 
 	case Array:
 		buf = append(buf, '[')
-		array := v.Array()
-		for i := range array {
-			if i > 0 {
+		var count int
+		for elem := range v.Array() {
+			if count > 0 {
 				buf = append(buf, ',')
 			}
-			buf = array[i].Append(buf)
+			buf = elem.Append(buf)
+			count++
 		}
 		return append(buf, ']')
 
 	case Object:
 		buf = append(buf, '{')
-		fields := v.Object()
-		for i := range fields {
-			if i > 0 {
+		var count int
+		for k, v := range v.Object() {
+			if count > 0 {
 				buf = append(buf, ',')
 			}
-			buf = AppendQuote(buf, fields[i].Key)
+			buf = AppendQuote(buf, k)
 			buf = append(buf, ':')
-			buf = fields[i].Val.Append(buf)
+			buf = v.Append(buf)
+			count++
 		}
 		return append(buf, '}')
 

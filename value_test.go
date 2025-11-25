@@ -13,14 +13,8 @@ func TestAccessors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fields := val.Object()
-	fieldMap := make(map[string]jsonlite.Value)
-	for _, f := range fields {
-		fieldMap[f.Key] = f.Val
-	}
-
 	// Test number accessor - all numbers are float64
-	if num1Val, ok := fieldMap["num1"]; ok {
+	if num1Val := val.Lookup("num1"); num1Val != nil {
 		if num1Val.Kind() != jsonlite.Number {
 			t.Errorf("num1: expected Number, got %v", num1Val.Kind())
 		}
@@ -32,7 +26,7 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test large number
-	if num2Val, ok := fieldMap["num2"]; ok {
+	if num2Val := val.Lookup("num2"); num2Val != nil {
 		if num2Val.Kind() != jsonlite.Number {
 			t.Errorf("num2: expected Number, got %v", num2Val.Kind())
 		}
@@ -41,7 +35,7 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test float
-	if num3Val, ok := fieldMap["num3"]; ok {
+	if num3Val := val.Lookup("num3"); num3Val != nil {
 		if num3Val.Kind() != jsonlite.Number {
 			t.Errorf("num3: expected Number, got %v", num3Val.Kind())
 		}
@@ -53,7 +47,7 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test string accessor
-	if strVal, ok := fieldMap["string"]; ok {
+	if strVal := val.Lookup("string"); strVal != nil {
 		if strVal.Kind() != jsonlite.String {
 			t.Errorf("string: expected String, got %v", strVal.Kind())
 		}
@@ -65,7 +59,7 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test bool accessor
-	if boolVal, ok := fieldMap["bool"]; ok {
+	if boolVal := val.Lookup("bool"); boolVal != nil {
 		if boolVal.Kind() != jsonlite.True {
 			t.Errorf("bool: expected True, got %v", boolVal.Kind())
 		}
@@ -74,7 +68,7 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test null
-	if nullVal, ok := fieldMap["null"]; ok {
+	if nullVal := val.Lookup("null"); nullVal != nil {
 		if nullVal.Kind() != jsonlite.Null {
 			t.Errorf("null: expected Null, got %v", nullVal.Kind())
 		}
@@ -83,26 +77,24 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test array accessor
-	if arrayVal, ok := fieldMap["array"]; ok {
+	if arrayVal := val.Lookup("array"); arrayVal != nil {
 		if arrayVal.Kind() != jsonlite.Array {
 			t.Errorf("array: expected Array, got %v", arrayVal.Kind())
 		}
-		arr := arrayVal.Array()
-		if len(arr) != 2 {
-			t.Errorf("array: expected length 2, got %d", len(arr))
+		if arrayVal.Len() != 2 {
+			t.Errorf("array: expected length 2, got %d", arrayVal.Len())
 		}
 	} else {
 		t.Error("array field not found")
 	}
 
 	// Test object accessor
-	if objVal, ok := fieldMap["object"]; ok {
+	if objVal := val.Lookup("object"); objVal != nil {
 		if objVal.Kind() != jsonlite.Object {
 			t.Errorf("object: expected Object, got %v", objVal.Kind())
 		}
-		obj := objVal.Object()
-		if len(obj) != 1 {
-			t.Errorf("object: expected length 1, got %d", len(obj))
+		if objVal.Len() != 1 {
+			t.Errorf("object: expected length 1, got %d", objVal.Len())
 		}
 	} else {
 		t.Error("object field not found")
@@ -271,36 +263,34 @@ func valuesEqual(a, b jsonlite.Value) bool {
 	case jsonlite.String:
 		return a.String() == b.String()
 	case jsonlite.Array:
-		aArr := a.Array()
-		bArr := b.Array()
-		if len(aArr) != len(bArr) {
+		if a.Len() != b.Len() {
 			return false
 		}
-		for i := range aArr {
-			if !valuesEqual(aArr[i], bArr[i]) {
+		// Collect array elements
+		var aElems, bElems []*jsonlite.Value
+		for v := range a.Array() {
+			aElems = append(aElems, v)
+		}
+		for v := range b.Array() {
+			bElems = append(bElems, v)
+		}
+		for i := range aElems {
+			if !valuesEqual(*aElems[i], *bElems[i]) {
 				return false
 			}
 		}
 		return true
 	case jsonlite.Object:
-		aObj := a.Object()
-		bObj := b.Object()
-		if len(aObj) != len(bObj) {
+		if a.Len() != b.Len() {
 			return false
 		}
-		// Note: field order might differ, so we need to match by key
-		for _, af := range aObj {
-			found := false
-			for _, bf := range bObj {
-				if af.Key == bf.Key {
-					if !valuesEqual(af.Val, bf.Val) {
-						return false
-					}
-					found = true
-					break
-				}
+		// Check each key in a exists in b with equal value
+		for key, aVal := range a.Object() {
+			bVal := b.Lookup(key)
+			if bVal == nil {
+				return false
 			}
-			if !found {
+			if !valuesEqual(*aVal, *bVal) {
 				return false
 			}
 		}
