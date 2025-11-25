@@ -45,7 +45,6 @@ func main() {
 ### Parsing
 
 - `Parse(data string) (*Value, error)` - Parse a JSON string
-- `ParseBytes(data []byte) (*Value, error)` - Parse JSON from a byte slice
 
 ### Value Types
 
