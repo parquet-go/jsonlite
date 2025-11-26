@@ -49,16 +49,20 @@ func escaped(s string) bool {
 	// SIMD-like scanning for backslash or control characters.
 	// The bit tricks only work correctly when all bytes are < 0x80,
 	// so we also check for high bytes and fall back to byte-by-byte.
-	chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
-	for _, n := range chunks {
-		// Check for high bytes (>= 0x80), backslash, or control chars
-		mask := n | below(n, 0x20) | contains(n, '\\')
-		if (mask & msb) != 0 {
-			return true
+	var i int
+	if len(s) >= 8 {
+		chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
+		for _, n := range chunks {
+			// Check for high bytes (>= 0x80), backslash, or control chars
+			mask := n | below(n, 0x20) | contains(n, '\\')
+			if (mask & msb) != 0 {
+				return true
+			}
 		}
+		i = len(chunks) * 8
 	}
 
-	for i := len(chunks) * 8; i < len(s); i++ {
+	for ; i < len(s); i++ {
 		c := s[i]
 		if c < 0x20 || c == '\\' {
 			return true
@@ -75,30 +79,34 @@ func unescapeIndex(s string) int {
 	// SIMD-like scanning for backslash or control characters.
 	// The bit tricks only work correctly when all bytes are < 0x80,
 	// so we also check for high bytes and fall back to byte-by-byte.
-	chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
-	for i, n := range chunks {
-		// Check for high bytes (>= 0x80), backslash, or control chars
-		mask := n | below(n, 0x20) | contains(n, '\\')
-		if (mask & msb) != 0 {
-			// Found something in this chunk - check byte at the position
-			j := i*8 + bits.TrailingZeros64(mask&msb)/8
-			c := s[j]
-			switch {
-			case c < 0x20, c == '\\':
-				return j
-			default:
-				// High byte (>= 0x80) - scan rest of chunk byte by byte
-				for j++; j < (i+1)*8; j++ {
-					c := s[j]
-					if c < 0x20 || c == '\\' {
-						return j
+	var i int
+	if len(s) >= 8 {
+		chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
+		for j, n := range chunks {
+			// Check for high bytes (>= 0x80), backslash, or control chars
+			mask := n | below(n, 0x20) | contains(n, '\\')
+			if (mask & msb) != 0 {
+				// Found something in this chunk - check byte at the position
+				k := j*8 + bits.TrailingZeros64(mask&msb)/8
+				c := s[k]
+				switch {
+				case c < 0x20, c == '\\':
+					return k
+				default:
+					// High byte (>= 0x80) - scan rest of chunk byte by byte
+					for k++; k < (j+1)*8; k++ {
+						c := s[k]
+						if c < 0x20 || c == '\\' {
+							return k
+						}
 					}
 				}
 			}
 		}
+		i = len(chunks) * 8
 	}
 
-	for i := len(chunks) * 8; i < len(s); i++ {
+	for ; i < len(s); i++ {
 		c := s[i]
 		if c < 0x20 || c == '\\' {
 			return i

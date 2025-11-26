@@ -80,18 +80,22 @@ const (
 // it includes a double quote or backslash. If no chars in `s` require escaping,
 // the return value is -1.
 func escapeIndex(s string) int {
-	chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
-	for i, n := range chunks {
-		// combine masks before checking for the MSB of each byte. We include
-		// `n` in the mask to check whether any of the *input* byte MSBs were
-		// set (i.e. the byte was outside the ASCII range).
-		mask := n | below(n, 0x20) | contains(n, '"') | contains(n, '\\')
-		if (mask & msb) != 0 {
-			return i*8 + bits.TrailingZeros64(mask&msb)/8
+	var i int
+	if len(s) >= 8 {
+		chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
+		for j, n := range chunks {
+			// combine masks before checking for the MSB of each byte. We include
+			// `n` in the mask to check whether any of the *input* byte MSBs were
+			// set (i.e. the byte was outside the ASCII range).
+			mask := n | below(n, 0x20) | contains(n, '"') | contains(n, '\\')
+			if (mask & msb) != 0 {
+				return j*8 + bits.TrailingZeros64(mask&msb)/8
+			}
 		}
+		i = len(chunks) * 8
 	}
 
-	for i := len(chunks) * 8; i < len(s); i++ {
+	for ; i < len(s); i++ {
 		c := s[i]
 		if c < 0x20 || c > 0x7f || c == '"' || c == '\\' {
 			return i
