@@ -14,65 +14,6 @@ var (
 	errUnexpectedEndOfArray  = errors.New("unexpected end of array")
 )
 
-// isValidNumber checks if a string is a valid JSON number.
-// JSON numbers: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
-func isValidNumber(s string) bool {
-	if len(s) == 0 {
-		return false
-	}
-	i := 0
-
-	// Optional minus sign
-	if s[i] == '-' {
-		i++
-		if i >= len(s) {
-			return false
-		}
-	}
-
-	// Integer part
-	if s[i] == '0' {
-		i++
-	} else if s[i] >= '1' && s[i] <= '9' {
-		i++
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-	} else {
-		return false
-	}
-
-	// Fractional part
-	if i < len(s) && s[i] == '.' {
-		i++
-		if i >= len(s) || s[i] < '0' || s[i] > '9' {
-			return false
-		}
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-	}
-
-	// Exponent part
-	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		i++
-		if i >= len(s) {
-			return false
-		}
-		if s[i] == '+' || s[i] == '-' {
-			i++
-		}
-		if i >= len(s) || s[i] < '0' || s[i] > '9' {
-			return false
-		}
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-	}
-
-	return i == len(s)
-}
-
 // Tokenizer is a JSON tokenizer that splits input into tokens.
 // It skips whitespace and returns individual JSON tokens one at a time.
 type Tokenizer struct {
@@ -193,7 +134,7 @@ func parseTokens(tokens *Tokenizer) (Value, error) {
 	case '}':
 		return Value{}, errEndOfObject
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		if !isValidNumber(token) {
+		if !validNumber(token) {
 			return Value{}, fmt.Errorf("invalid number: %q", token)
 		}
 		return makeNumberValue(token), nil

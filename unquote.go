@@ -200,7 +200,7 @@ func parseHex4(s string) (rune, bool) {
 		return 0, false
 	}
 	var r rune
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		r <<= 4
 		c := s[i]
 		switch {

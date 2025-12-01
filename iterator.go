@@ -160,7 +160,7 @@ func tokenKind(token string) (Kind, error) {
 	case '{':
 		return Object, nil
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		if !isValidNumber(token) {
+		if !validNumber(token) {
 			return Number, fmt.Errorf("invalid number: %q", token)
 		}
 		return Number, nil
