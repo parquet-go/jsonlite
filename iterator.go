@@ -282,14 +282,20 @@ func (it *Iterator) value() (Value, error) {
 	}
 }
 
+// Null returns true if the current value is null.
+func (it *Iterator) Null() bool {
+	return it.kind == Null
+}
+
 // Bool returns the current value as a boolean.
-// Returns an error if the value is not a boolean or a string that can be parsed as a boolean.
+// Returns false for null values.
+// Returns an error if the value is not a boolean, null, or a string that can be parsed as a boolean.
 func (it *Iterator) Bool() (bool, error) {
 	switch it.kind {
+	case Null, False:
+		return false, nil
 	case True:
 		return true, nil
-	case False:
-		return false, nil
 	case String:
 		s, err := Unquote(it.token)
 		if err != nil {
@@ -302,9 +308,12 @@ func (it *Iterator) Bool() (bool, error) {
 }
 
 // Int returns the current value as a signed 64-bit integer.
-// Returns an error if the value is not a number or a string that can be parsed as an integer.
+// Returns 0 for null values.
+// Returns an error if the value is not a number, null, or a string that can be parsed as an integer.
 func (it *Iterator) Int() (int64, error) {
 	switch it.kind {
+	case Null:
+		return 0, nil
 	case Number:
 		return strconv.ParseInt(it.token, 10, 64)
 	case String:
@@ -319,9 +328,12 @@ func (it *Iterator) Int() (int64, error) {
 }
 
 // Float returns the current value as a 64-bit floating point number.
-// Returns an error if the value is not a number or a string that can be parsed as a float.
+// Returns 0 for null values.
+// Returns an error if the value is not a number, null, or a string that can be parsed as a float.
 func (it *Iterator) Float() (float64, error) {
 	switch it.kind {
+	case Null:
+		return 0, nil
 	case Number:
 		return strconv.ParseFloat(it.token, 64)
 	case String:
@@ -336,9 +348,12 @@ func (it *Iterator) Float() (float64, error) {
 }
 
 // String returns the current value as a string.
-// Returns an error if the value is not a string.
+// Returns "" for null values.
+// Returns an error if the value is not a string or null.
 func (it *Iterator) String() (string, error) {
 	switch it.kind {
+	case Null:
+		return "", nil
 	case String:
 		return Unquote(it.token)
 	default:
@@ -347,11 +362,14 @@ func (it *Iterator) String() (string, error) {
 }
 
 // Duration returns the current value as a time.Duration.
+// Returns 0 for null values.
 // For numbers, the value is interpreted as seconds.
 // For strings, the value is parsed using time.ParseDuration.
 // Returns an error if the value cannot be converted to a duration.
 func (it *Iterator) Duration() (time.Duration, error) {
 	switch it.kind {
+	case Null:
+		return 0, nil
 	case Number:
 		f, err := strconv.ParseFloat(it.token, 64)
 		if err != nil {
@@ -370,11 +388,14 @@ func (it *Iterator) Duration() (time.Duration, error) {
 }
 
 // Time returns the current value as a time.Time.
+// Returns the zero time for null values.
 // For numbers, the value is interpreted as seconds since Unix epoch.
 // For strings, the value is parsed using RFC3339 format.
 // Returns an error if the value cannot be converted to a time.
 func (it *Iterator) Time() (time.Time, error) {
 	switch it.kind {
+	case Null:
+		return time.Time{}, nil
 	case Number:
 		f, err := strconv.ParseFloat(it.token, 64)
 		if err != nil {
@@ -398,10 +419,14 @@ func (it *Iterator) Time() (time.Time, error) {
 // on the field's value. Call Kind(), Value(), Object(), or Array() to process
 // the value. If the value is not consumed before the next iteration, it will
 // be automatically skipped.
+// For null values, returns an empty iterator (no iterations).
 //
-// Must only be called when Kind() == Object.
+// Must only be called when Kind() == Object or Kind() == Null.
 func (it *Iterator) Object() iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
+		if it.kind == Null {
+			return // null is treated as empty object
+		}
 		it.consumed = true // mark the object itself as consumed
 		for i := 0; ; i++ {
 			// Auto-consume the previous value if it wasn't consumed
@@ -483,10 +508,14 @@ func (it *Iterator) Object() iter.Seq2[string, error] {
 // positioned on the element's value. Call Kind(), Value(), Object(), or
 // Array() to process the value. If the value is not consumed before the
 // next iteration, it will be automatically skipped.
+// For null values, returns an empty iterator (no iterations).
 //
-// Must only be called when Kind() == Array.
+// Must only be called when Kind() == Array or Kind() == Null.
 func (it *Iterator) Array() iter.Seq2[int, error] {
 	return func(yield func(int, error) bool) {
+		if it.kind == Null {
+			return // null is treated as empty array
+		}
 		it.consumed = true // mark the array itself as consumed
 		for i := 0; ; i++ {
 			// Auto-consume the previous value if it wasn't consumed

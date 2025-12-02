@@ -363,6 +363,680 @@ func TestIteratorNestedObjectArray(t *testing.T) {
 	}
 }
 
+// TestIteratorNestedArrays tests deeply nested arrays with auto-consume
+func TestIteratorNestedArrays(t *testing.T) {
+	input := `[[1, 2], [3, 4], [5, 6]]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var results [][]int64
+	for _, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		var inner []int64
+		for _, err := range iter.Array() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := iter.Int()
+			if err != nil {
+				t.Fatal(err)
+			}
+			inner = append(inner, v)
+		}
+		results = append(results, inner)
+	}
+
+	expected := [][]int64{{1, 2}, {3, 4}, {5, 6}}
+	if !reflect.DeepEqual(results, expected) {
+		t.Errorf("expected %v, got %v", expected, results)
+	}
+}
+
+// TestIteratorNestedObjects tests deeply nested objects with auto-consume
+func TestIteratorNestedObjects(t *testing.T) {
+	input := `{"a": {"x": 1}, "b": {"y": 2}, "c": {"z": 3}}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	results := make(map[string]map[string]int64)
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		inner := make(map[string]int64)
+		for innerKey, err := range iter.Object() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := iter.Int()
+			if err != nil {
+				t.Fatal(err)
+			}
+			inner[innerKey] = v
+		}
+		results[key] = inner
+	}
+
+	expected := map[string]map[string]int64{
+		"a": {"x": 1},
+		"b": {"y": 2},
+		"c": {"z": 3},
+	}
+	if !reflect.DeepEqual(results, expected) {
+		t.Errorf("expected %v, got %v", expected, results)
+	}
+}
+
+// TestIteratorMixedNesting tests mixed object/array nesting
+func TestIteratorMixedNesting(t *testing.T) {
+	input := `{"items": [{"id": 1, "tags": ["a", "b"]}, {"id": 2, "tags": ["c"]}]}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	type item struct {
+		id   int64
+		tags []string
+	}
+	var items []item
+
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key == "items" {
+			for _, err := range iter.Array() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				var it item
+				for field, err := range iter.Object() {
+					if err != nil {
+						t.Fatal(err)
+					}
+					switch field {
+					case "id":
+						it.id, err = iter.Int()
+						if err != nil {
+							t.Fatal(err)
+						}
+					case "tags":
+						for _, err := range iter.Array() {
+							if err != nil {
+								t.Fatal(err)
+							}
+							tag, err := iter.String()
+							if err != nil {
+								t.Fatal(err)
+							}
+							it.tags = append(it.tags, tag)
+						}
+					}
+				}
+				items = append(items, it)
+			}
+		}
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].id != 1 || !reflect.DeepEqual(items[0].tags, []string{"a", "b"}) {
+		t.Errorf("item 0: expected {1, [a b]}, got %v", items[0])
+	}
+	if items[1].id != 2 || !reflect.DeepEqual(items[1].tags, []string{"c"}) {
+		t.Errorf("item 1: expected {2, [c]}, got %v", items[1])
+	}
+}
+
+// TestIteratorSkipNestedArray tests skipping nested arrays
+func TestIteratorSkipNestedArray(t *testing.T) {
+	input := `{"skip": [[1, 2], [3, 4]], "keep": "value"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var keepValue string
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key == "keep" {
+			keepValue, err = iter.String()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		// "skip" is auto-consumed
+	}
+
+	if keepValue != "value" {
+		t.Errorf("expected 'value', got %q", keepValue)
+	}
+}
+
+// TestIteratorSkipNestedObject tests skipping nested objects
+func TestIteratorSkipNestedObject(t *testing.T) {
+	input := `{"skip": {"a": {"b": {"c": 1}}}, "keep": 42}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var keepValue int64
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key == "keep" {
+			keepValue, err = iter.Int()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		// "skip" is auto-consumed
+	}
+
+	if keepValue != 42 {
+		t.Errorf("expected 42, got %d", keepValue)
+	}
+}
+
+// TestIteratorAlternateConsumeSkip tests alternating between consuming and skipping
+func TestIteratorAlternateConsumeSkip(t *testing.T) {
+	input := `[{"a": 1}, [2, 3], {"b": 4}, [5, 6], {"c": 7}]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var objectValues []int64
+	for i, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Only consume objects (at even indices)
+		if i%2 == 0 {
+			for _, err := range iter.Object() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				v, err := iter.Int()
+				if err != nil {
+					t.Fatal(err)
+				}
+				objectValues = append(objectValues, v)
+			}
+		}
+		// Arrays at odd indices are auto-skipped
+	}
+
+	expected := []int64{1, 4, 7}
+	if !reflect.DeepEqual(objectValues, expected) {
+		t.Errorf("expected %v, got %v", expected, objectValues)
+	}
+}
+
+// TestIteratorConsumeWithValue tests using Value() to consume nested structures
+func TestIteratorConsumeWithValue(t *testing.T) {
+	input := `{"nested": {"a": [1, 2, 3], "b": "test"}, "simple": 42}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var nestedValue *jsonlite.Value
+	var simpleValue int64
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch key {
+		case "nested":
+			nestedValue, err = iter.Value()
+			if err != nil {
+				t.Fatal(err)
+			}
+		case "simple":
+			simpleValue, err = iter.Int()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if nestedValue == nil {
+		t.Fatal("nested value is nil")
+	}
+	if nestedValue.Kind() != jsonlite.Object {
+		t.Errorf("expected nested to be Object, got %v", nestedValue.Kind())
+	}
+	if simpleValue != 42 {
+		t.Errorf("expected simple=42, got %d", simpleValue)
+	}
+}
+
+// TestIteratorEmptyNestedStructures tests empty nested arrays and objects
+func TestIteratorEmptyNestedStructures(t *testing.T) {
+	input := `{"empty_arr": [], "empty_obj": {}, "arr_of_empty": [{}, [], {}], "after": "ok"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var keys []string
+	var afterValue string
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key)
+		switch key {
+		case "empty_arr":
+			count := 0
+			for _, err := range iter.Array() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				count++
+			}
+			if count != 0 {
+				t.Errorf("expected empty array, got %d elements", count)
+			}
+		case "empty_obj":
+			count := 0
+			for _, err := range iter.Object() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				count++
+			}
+			if count != 0 {
+				t.Errorf("expected empty object, got %d fields", count)
+			}
+		case "arr_of_empty":
+			count := 0
+			for _, err := range iter.Array() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				count++
+				// Don't consume, let them auto-skip
+			}
+			if count != 3 {
+				t.Errorf("expected 3 elements, got %d", count)
+			}
+		case "after":
+			afterValue, err = iter.String()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	expectedKeys := []string{"empty_arr", "empty_obj", "arr_of_empty", "after"}
+	if !reflect.DeepEqual(keys, expectedKeys) {
+		t.Errorf("expected keys %v, got %v", expectedKeys, keys)
+	}
+	if afterValue != "ok" {
+		t.Errorf("expected after='ok', got %q", afterValue)
+	}
+}
+
+// TestIteratorDeeplyNested tests very deeply nested structures
+func TestIteratorDeeplyNested(t *testing.T) {
+	input := `{"l1": {"l2": {"l3": {"l4": {"value": 42}}}}}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var value int64
+	for _, err := range iter.Object() { // l1
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, err := range iter.Object() { // l2
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, err := range iter.Object() { // l3
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, err := range iter.Object() { // l4
+					if err != nil {
+						t.Fatal(err)
+					}
+					for key, err := range iter.Object() { // value
+						if err != nil {
+							t.Fatal(err)
+						}
+						if key == "value" {
+							value, err = iter.Int()
+							if err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if value != 42 {
+		t.Errorf("expected 42, got %d", value)
+	}
+}
+
+// TestIteratorArrayOfArrays tests array containing arrays with partial consumption
+func TestIteratorArrayOfArrays(t *testing.T) {
+	input := `[[1, 2, 3], [4, 5, 6], [7, 8, 9]]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	// Only get first element of each inner array
+	var firstElements []int64
+	for _, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, err := range iter.Array() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i == 0 {
+				v, err := iter.Int()
+				if err != nil {
+					t.Fatal(err)
+				}
+				firstElements = append(firstElements, v)
+			}
+			// Rest are auto-skipped
+		}
+	}
+
+	expected := []int64{1, 4, 7}
+	if !reflect.DeepEqual(firstElements, expected) {
+		t.Errorf("expected %v, got %v", expected, firstElements)
+	}
+}
+
+// TestIteratorObjectValueThenSkip tests consuming first field, skipping rest
+func TestIteratorObjectValueThenSkip(t *testing.T) {
+	input := `[{"id": 1, "data": {"nested": "value"}}, {"id": 2, "data": [1, 2, 3]}]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var ids []int64
+	for _, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, err := range iter.Object() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if key == "id" {
+				id, err := iter.Int()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ids = append(ids, id)
+			}
+			// "data" fields are auto-skipped
+		}
+	}
+
+	expected := []int64{1, 2}
+	if !reflect.DeepEqual(ids, expected) {
+		t.Errorf("expected %v, got %v", expected, ids)
+	}
+}
+
+// TestIteratorBreakFromNestedLoop tests breaking out of nested iteration
+func TestIteratorBreakFromNestedLoop(t *testing.T) {
+	input := `{"items": [{"id": 1}, {"id": 2}, {"id": 3}], "other": "value"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var foundId int64
+	var otherValue string
+outer:
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch key {
+		case "items":
+			for _, err := range iter.Array() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				for field, err := range iter.Object() {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if field == "id" {
+						foundId, err = iter.Int()
+						if err != nil {
+							t.Fatal(err)
+						}
+						if foundId == 2 {
+							// Found what we want, but we're mid-iteration
+							// This tests that we handle partial iteration correctly
+							break outer
+						}
+					}
+				}
+			}
+		case "other":
+			otherValue, err = iter.String()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if foundId != 2 {
+		t.Errorf("expected foundId=2, got %d", foundId)
+	}
+	// Note: otherValue won't be set because we broke out early
+	if otherValue != "" {
+		t.Errorf("expected otherValue='', got %q", otherValue)
+	}
+}
+
+// TestIteratorNullObject tests that null is treated as an empty object
+func TestIteratorNullObject(t *testing.T) {
+	input := `{"data": null, "after": "ok"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var afterValue string
+	var dataIterations int
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch key {
+		case "data":
+			// Iterate over null as if it were an object - should yield nothing
+			for _, err := range iter.Object() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				dataIterations++
+			}
+		case "after":
+			afterValue, err = iter.String()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if dataIterations != 0 {
+		t.Errorf("expected 0 iterations over null object, got %d", dataIterations)
+	}
+	if afterValue != "ok" {
+		t.Errorf("expected after='ok', got %q", afterValue)
+	}
+}
+
+// TestIteratorNullArray tests that null is treated as an empty array
+func TestIteratorNullArray(t *testing.T) {
+	input := `{"items": null, "after": "ok"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var afterValue string
+	var itemIterations int
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch key {
+		case "items":
+			// Iterate over null as if it were an array - should yield nothing
+			for _, err := range iter.Array() {
+				if err != nil {
+					t.Fatal(err)
+				}
+				itemIterations++
+			}
+		case "after":
+			afterValue, err = iter.String()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if itemIterations != 0 {
+		t.Errorf("expected 0 iterations over null array, got %d", itemIterations)
+	}
+	if afterValue != "ok" {
+		t.Errorf("expected after='ok', got %q", afterValue)
+	}
+}
+
+// TestIteratorNullInArray tests null values inside an array
+func TestIteratorNullInArray(t *testing.T) {
+	input := `[1, null, 3]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var values []int64
+	var nullCount int
+	for _, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if iter.Null() {
+			nullCount++
+			// Still need to "consume" null - Int() handles it
+			_, _ = iter.Int()
+		} else {
+			v, err := iter.Int()
+			if err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, v)
+		}
+	}
+
+	expected := []int64{1, 3}
+	if !reflect.DeepEqual(values, expected) {
+		t.Errorf("expected %v, got %v", expected, values)
+	}
+	if nullCount != 1 {
+		t.Errorf("expected 1 null, got %d", nullCount)
+	}
+}
+
+// TestIteratorNullValuesInObject tests null values for object fields
+func TestIteratorNullValuesInObject(t *testing.T) {
+	input := `{"name": null, "age": null, "active": null}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var name string
+	var age int64
+	var active bool
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch key {
+		case "name":
+			name, err = iter.String()
+			if err != nil {
+				t.Fatal(err)
+			}
+		case "age":
+			age, err = iter.Int()
+			if err != nil {
+				t.Fatal(err)
+			}
+		case "active":
+			active, err = iter.Bool()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// All should be zero values
+	if name != "" {
+		t.Errorf("expected name='', got %q", name)
+	}
+	if age != 0 {
+		t.Errorf("expected age=0, got %d", age)
+	}
+	if active != false {
+		t.Errorf("expected active=false, got %v", active)
+	}
+}
+
 func TestIteratorObjectAutoConsume(t *testing.T) {
 	// Test that values are automatically consumed when not explicitly read
 	input := `{"a": [1, 2, 3], "b": {"nested": "object"}, "c": "simple"}`
@@ -617,6 +1291,32 @@ func TestIteratorValueNoAlloc(t *testing.T) {
 	}
 }
 
+func TestIteratorNull(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{`null`, true},
+		{`true`, false},
+		{`false`, false},
+		{`0`, false},
+		{`""`, false},
+		{`[]`, false},
+		{`{}`, false},
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got := iter.Null()
+		if got != tt.expected {
+			t.Errorf("iterate %q: expected Null()=%v, got %v", tt.input, tt.expected, got)
+		}
+	}
+}
+
 func TestIteratorBool(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -629,8 +1329,8 @@ func TestIteratorBool(t *testing.T) {
 		{`"false"`, false, false},
 		{`"1"`, true, false},
 		{`"0"`, false, false},
+		{`null`, false, false}, // null returns zero value (false)
 		{`123`, false, true},
-		{`null`, false, true},
 		{`"invalid"`, false, true},
 	}
 
@@ -666,9 +1366,9 @@ func TestIteratorInt(t *testing.T) {
 		{`"42"`, 42, false},
 		{`"-123"`, -123, false},
 		{`"0"`, 0, false},
+		{`null`, 0, false}, // null returns zero value (0)
 		{`3.14`, 0, true},  // float is not a valid int
 		{`true`, 0, true},  // bool is not valid
-		{`null`, 0, true},  // null is not valid
 		{`"abc"`, 0, true}, // non-numeric string
 	}
 
@@ -706,8 +1406,8 @@ func TestIteratorFloat(t *testing.T) {
 		{`"3.14"`, 3.14, false},
 		{`"42"`, 42.0, false},
 		{`"-123.456"`, -123.456, false},
+		{`null`, 0, false}, // null returns zero value (0)
 		{`true`, 0, true},  // bool is not valid
-		{`null`, 0, true},  // null is not valid
 		{`"abc"`, 0, true}, // non-numeric string
 	}
 
@@ -742,9 +1442,9 @@ func TestIteratorString(t *testing.T) {
 		{`"hello world"`, "hello world", false},
 		{`"with\nnewline"`, "with\nnewline", false},
 		{`"with\ttab"`, "with\ttab", false},
+		{`null`, "", false}, // null returns zero value ("")
 		{`42`, "", true},    // number is not valid
 		{`true`, "", true},  // bool is not valid
-		{`null`, "", true},  // null is not valid
 		{`[1,2]`, "", true}, // array is not valid
 	}
 
@@ -783,8 +1483,8 @@ func TestIteratorDuration(t *testing.T) {
 		{`"1m"`, time.Minute, false},
 		{`"1h"`, time.Hour, false},
 		{`"1h30m"`, 90 * time.Minute, false},
-		{`true`, 0, true},     // bool is not valid
-		{`null`, 0, true},     // null is not valid
+		{`null`, 0, false},     // null returns zero value (0)
+		{`true`, 0, true},      // bool is not valid
 		{`"invalid"`, 0, true}, // invalid duration string
 	}
 
@@ -821,9 +1521,9 @@ func TestIteratorTime(t *testing.T) {
 		{`0`, time.Unix(0, 0).UTC(), false},
 		{`"2023-06-15T12:30:45Z"`, refTime, false},
 		{`"2023-06-15T12:30:45+00:00"`, refTime, false},
-		{`true`, time.Time{}, true},     // bool is not valid
-		{`null`, time.Time{}, true},     // null is not valid
-		{`"invalid"`, time.Time{}, true}, // invalid time string
+		{`null`, time.Time{}, false},        // null returns zero time
+		{`true`, time.Time{}, true},         // bool is not valid
+		{`"invalid"`, time.Time{}, true},    // invalid time string
 		{`"2023-06-15"`, time.Time{}, true}, // wrong format (not RFC3339)
 	}
 
