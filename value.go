@@ -3,9 +3,11 @@ package jsonlite
 import (
 	"encoding/json"
 	"iter"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -274,6 +276,150 @@ func makeObjectValue(fields []field) Value {
 		p: unsafe.Pointer(unsafe.SliceData(fields)),
 		n: (uintptr(Object) << kindShift) | uintptr(len(fields)),
 	}
+}
+
+// AsBool coerces the value to a boolean.
+// Returns false for nil, Null, False, zero numbers, and empty strings/objects/arrays.
+// Returns true for True, non-zero numbers, and non-empty strings/objects/arrays.
+func AsBool(v *Value) bool {
+	if v != nil {
+		switch v.Kind() {
+		case True:
+			return true
+		case Number:
+			f, err := strconv.ParseFloat(v.raw(), 64)
+			return err == nil && f != 0
+		case String, Object, Array:
+			return v.len() > 0
+		}
+	}
+	return false
+}
+
+// AsString coerces the value to a string.
+// Returns "" for nil and Null.
+// Returns "true"/"false" for booleans.
+// Returns the raw value for numbers and strings.
+// Returns the JSON representation for objects and arrays.
+func AsString(v *Value) string {
+	if v != nil {
+		switch v.Kind() {
+		case True:
+			return "true"
+		case False:
+			return "false"
+		case Number, String:
+			return v.raw()
+		case Object, Array:
+			return string(v.Append(nil))
+		}
+	}
+	return ""
+}
+
+// AsInt coerces the value to a signed 64-bit integer.
+// Returns 0 for nil, Null, False, objects, and arrays.
+// Returns 1 for True.
+// Parses numbers and strings, truncating floats. Returns 0 on parse failure.
+func AsInt(v *Value) int64 {
+	if v != nil {
+		switch v.Kind() {
+		case True:
+			return 1
+		case Number, String:
+			if i, err := strconv.ParseInt(v.raw(), 10, 64); err == nil {
+				return i
+			}
+			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+				return int64(f)
+			}
+		}
+	}
+	return 0
+}
+
+// AsUint coerces the value to an unsigned 64-bit integer.
+// Returns 0 for nil, Null, False, objects, arrays, and negative numbers.
+// Returns 1 for True.
+// Parses numbers and strings, truncating floats. Returns 0 on parse failure.
+func AsUint(v *Value) uint64 {
+	if v != nil {
+		switch v.Kind() {
+		case True:
+			return 1
+		case Number, String:
+			if u, err := strconv.ParseUint(v.raw(), 10, 64); err == nil {
+				return u
+			}
+			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+				if f >= 0 {
+					return uint64(f)
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// AsFloat coerces the value to a 64-bit floating point number.
+// Returns 0 for nil, Null, False, objects, and arrays.
+// Returns 1 for True.
+// Parses numbers and strings. Returns 0 on parse failure.
+func AsFloat(v *Value) float64 {
+	if v != nil {
+		switch v.Kind() {
+		case True:
+			return 1
+		case Number, String:
+			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+				return f
+			}
+		}
+	}
+	return 0
+}
+
+// AsDuration coerces the value to a time.Duration.
+// Returns 0 for nil, Null, False, objects, and arrays.
+// For strings, parses using time.ParseDuration.
+// For numbers, interprets the value as seconds.
+func AsDuration(v *Value) time.Duration {
+	if v != nil {
+		switch v.Kind() {
+		case True:
+			return time.Second
+		case Number:
+			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+				return time.Duration(f * float64(time.Second))
+			}
+		case String:
+			if d, err := time.ParseDuration(v.raw()); err == nil {
+				return d
+			}
+		}
+	}
+	return 0
+}
+
+// AsTime coerces the value to a time.Time.
+// Returns the zero time for nil, Null, False, objects, and arrays.
+// For strings, parses using RFC3339 format in UTC.
+// For numbers, interprets the value as seconds since Unix epoch.
+func AsTime(v *Value) time.Time {
+	if v != nil {
+		switch v.Kind() {
+		case Number:
+			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+				sec, frac := math.Modf(f)
+				return time.Unix(int64(sec), int64(frac*1e9)).UTC()
+			}
+		case String:
+			if t, err := time.ParseInLocation(time.RFC3339, v.raw(), time.UTC); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // Append serializes the Value to JSON and appends it to the buffer.

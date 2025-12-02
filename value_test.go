@@ -2,6 +2,7 @@ package jsonlite_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/parquet-go/jsonlite"
 )
@@ -581,5 +582,260 @@ func TestValueValidOperations(t *testing.T) {
 
 			tt.operation(val)
 		})
+	}
+}
+
+func TestAsBool(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		// nil is tested separately
+		{"null", false},
+		{"true", true},
+		{"false", false},
+		{"0", false},
+		{"0.0", false},
+		{"-0", false},
+		{"1", true},
+		{"-1", true},
+		{"3.14", true},
+		{`""`, false},
+		{`"hello"`, true},
+		{"[]", false},
+		{"[1]", true},
+		{"{}", false},
+		{`{"a":1}`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			if got := jsonlite.AsBool(val); got != tt.expected {
+				t.Errorf("AsBool(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsBool(nil); got != false {
+		t.Errorf("AsBool(nil) = %v, want false", got)
+	}
+}
+
+func TestAsString(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"null", ""},
+		{"true", "true"},
+		{"false", "false"},
+		{"42", "42"},
+		{"3.14", "3.14"},
+		{`"hello"`, "hello"},
+		{"[]", "[]"},
+		{"[1,2]", "[1,2]"},
+		{"{}", "{}"},
+		{`{"a":1}`, `{"a":1}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			if got := jsonlite.AsString(val); got != tt.expected {
+				t.Errorf("AsString(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsString(nil); got != "" {
+		t.Errorf("AsString(nil) = %q, want \"\"", got)
+	}
+}
+
+func TestAsInt(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+	}{
+		{"null", 0},
+		{"true", 1},
+		{"false", 0},
+		{"42", 42},
+		{"-42", -42},
+		{"3.14", 3},
+		{"-3.99", -3},
+		{`"123"`, 123},
+		{`"-456"`, -456},
+		{`"3.14"`, 3},
+		{`"hello"`, 0},
+		{"[]", 0},
+		{"{}", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			if got := jsonlite.AsInt(val); got != tt.expected {
+				t.Errorf("AsInt(%q) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsInt(nil); got != 0 {
+		t.Errorf("AsInt(nil) = %d, want 0", got)
+	}
+}
+
+func TestAsUint(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected uint64
+	}{
+		{"null", 0},
+		{"true", 1},
+		{"false", 0},
+		{"42", 42},
+		{"-42", 0},
+		{"3.14", 3},
+		{"-3.14", 0},
+		{`"123"`, 123},
+		{`"-456"`, 0},
+		{`"hello"`, 0},
+		{"[]", 0},
+		{"{}", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			if got := jsonlite.AsUint(val); got != tt.expected {
+				t.Errorf("AsUint(%q) = %d, want %d", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsUint(nil); got != 0 {
+		t.Errorf("AsUint(nil) = %d, want 0", got)
+	}
+}
+
+func TestAsFloat(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected float64
+	}{
+		{"null", 0},
+		{"true", 1},
+		{"false", 0},
+		{"42", 42},
+		{"-42", -42},
+		{"3.14", 3.14},
+		{`"3.14"`, 3.14},
+		{`"hello"`, 0},
+		{"[]", 0},
+		{"{}", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			if got := jsonlite.AsFloat(val); got != tt.expected {
+				t.Errorf("AsFloat(%q) = %f, want %f", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsFloat(nil); got != 0 {
+		t.Errorf("AsFloat(nil) = %f, want 0", got)
+	}
+}
+
+func TestAsDuration(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected time.Duration
+	}{
+		{"null", 0},
+		{"true", time.Second},
+		{"false", 0},
+		{"1", time.Second},
+		{"1.5", 1500 * time.Millisecond},
+		{"0.001", time.Millisecond},
+		{`"1s"`, time.Second},
+		{`"500ms"`, 500 * time.Millisecond},
+		{`"1h30m"`, 90 * time.Minute},
+		{`"invalid"`, 0},
+		{"[]", 0},
+		{"{}", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			if got := jsonlite.AsDuration(val); got != tt.expected {
+				t.Errorf("AsDuration(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsDuration(nil); got != 0 {
+		t.Errorf("AsDuration(nil) = %v, want 0", got)
+	}
+}
+
+func TestAsTime(t *testing.T) {
+	refTime := time.Date(2024, 6, 15, 12, 30, 45, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		input    string
+		expected time.Time
+	}{
+		{"null", "null", time.Time{}},
+		{"true", "true", time.Time{}},
+		{"false", "false", time.Time{}},
+		{"unix_epoch", "0", time.Unix(0, 0).UTC()},
+		{"unix_timestamp", "1718454645", refTime},
+		{"unix_with_fraction", "1718454645.5", time.Date(2024, 6, 15, 12, 30, 45, 500000000, time.UTC)},
+		{"rfc3339", `"2024-06-15T12:30:45Z"`, refTime},
+		{"invalid_string", `"not a time"`, time.Time{}},
+		{"array", "[]", time.Time{}},
+		{"object", "{}", time.Time{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+			got := jsonlite.AsTime(val)
+			if !got.Equal(tt.expected) {
+				t.Errorf("AsTime(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+
+	if got := jsonlite.AsTime(nil); !got.IsZero() {
+		t.Errorf("AsTime(nil) = %v, want zero time", got)
 	}
 }
