@@ -401,11 +401,11 @@ func (it *Iterator) Time() (time.Time, error) {
 //
 // Must only be called when Kind() == Object.
 func (it *Iterator) Object() iter.Seq2[string, error] {
-	it.consumed = true // mark the object itself as consumed
 	return func(yield func(string, error) bool) {
+		it.consumed = true // mark the object itself as consumed
 		for i := 0; ; i++ {
 			// Auto-consume the previous value if it wasn't consumed
-			if i != 0 {
+			if !it.consumed {
 				switch it.kind {
 				case Array:
 					it.consumed = true
@@ -486,11 +486,11 @@ func (it *Iterator) Object() iter.Seq2[string, error] {
 //
 // Must only be called when Kind() == Array.
 func (it *Iterator) Array() iter.Seq2[int, error] {
-	it.consumed = true // mark the array itself as consumed
 	return func(yield func(int, error) bool) {
+		it.consumed = true // mark the array itself as consumed
 		for i := 0; ; i++ {
 			// Auto-consume the previous value if it wasn't consumed
-			if i != 0 {
+			if !it.consumed {
 				switch it.kind {
 				case Array:
 					it.consumed = true
