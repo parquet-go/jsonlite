@@ -21,6 +21,45 @@ type Tokenizer struct {
 	offset int
 }
 
+// whitespaceMap is a 256-bit lookup table for ASCII whitespace characters.
+// Bit i is set if byte i is whitespace (space, tab, newline, carriage return).
+var whitespaceMap = func() [4]uint64 {
+	var m [4]uint64
+	for _, c := range []byte{' ', '\t', '\n', '\r'} {
+		m[c/64] |= 1 << (c % 64)
+	}
+	return m
+}()
+
+// isWhitespace returns true if c is a JSON whitespace character.
+func isWhitespace(c byte) bool {
+	return (whitespaceMap[c/64] & (1 << (c % 64))) != 0
+}
+
+// delimiterMap is a 256-bit lookup table for JSON delimiters and whitespace.
+// Used to quickly find the end of numbers/literals.
+var delimiterMap = func() [4]uint64 {
+	var m [4]uint64
+	for _, c := range []byte{' ', '\t', '\n', '\r', '[', ']', '{', '}', ':', ',', '"'} {
+		m[c/64] |= 1 << (c % 64)
+	}
+	return m
+}()
+
+// isDelimiter returns true if c is a JSON delimiter or whitespace.
+func isDelimiter(c byte) bool {
+	return (delimiterMap[c/64] & (1 << (c % 64))) != 0
+}
+
+// skipWhitespace returns the index of the first non-whitespace byte in s[i:],
+// or len(s) if there are none.
+func skipWhitespace(s string, i int) int {
+	for i < len(s) && isWhitespace(s[i]) {
+		i++
+	}
+	return i
+}
+
 // Tokenize creates a new Tokenizer for the given JSON string.
 func Tokenize(json string) *Tokenizer {
 	return &Tokenizer{json: json}
@@ -36,24 +75,18 @@ func (t *Tokenizer) Next() (token string, ok bool) {
 		return
 	}
 
-	if s[i] <= 0x20 { // whitespace?
-	skipSpaces:
-		for {
-			if i == len(s) {
-				return
-			}
-			switch s[i] {
-			case ' ', '\t', '\n', '\r':
-				i++
-			default:
-				break skipSpaces
-			}
+	// Skip whitespace using optimized function
+	if s[i] <= 0x20 {
+		i = skipWhitespace(s, i)
+		if i == len(s) {
+			return
 		}
 	}
 
 	j := i + 1
 	switch s[i] {
 	case '"':
+		// Find closing quote, handling escapes
 		for {
 			k := strings.IndexByte(s[j:], '"')
 			if k < 0 {
@@ -61,6 +94,7 @@ func (t *Tokenizer) Next() (token string, ok bool) {
 				break
 			}
 			j += k + 1
+			// Count preceding backslashes to check if quote is escaped
 			for k = j - 2; k > i && s[k] == '\\'; k-- {
 			}
 			if (j-k)%2 == 0 {
@@ -68,13 +102,10 @@ func (t *Tokenizer) Next() (token string, ok bool) {
 			}
 		}
 	case ',', ':', '[', ']', '{', '}':
+		// Single character tokens
 	default:
-		for j < len(s) {
-			switch s[j] {
-			case ' ', '\t', '\n', '\r', '[', ']', '{', '}', ':', ',', '"':
-				t.offset = j
-				return s[i:j], true
-			}
+		// Numbers and literals: scan until delimiter
+		for j < len(s) && !isDelimiter(s[j]) {
 			j++
 		}
 	}

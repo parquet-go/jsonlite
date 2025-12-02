@@ -243,6 +243,59 @@ func BenchmarkTokenize(b *testing.B) {
 	}
 }
 
+const cloudLoggingPayload = `{
+        "logName": "projects/test-project/logs/test-log",
+        "insertId": "test-insert-id",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "receiveTimestamp": "2024-01-15T10:30:01Z",
+        "severity": "INFO",
+        "textPayload": "test log message",
+        "resource": {
+            "type": "gce_instance",
+            "labels": {
+                "instance_id": "1234567890",
+                "zone": "us-central1-a"
+            }
+        },
+        "labels": {
+            "env": "test"
+        },
+        "httpRequest": {
+            "requestMethod": "GET",
+            "requestUrl": "https://example.com/api",
+            "requestSize": 1024,
+            "status": 200,
+            "responseSize": 2048,
+            "userAgent": "Mozilla/5.0",
+            "remoteIp": "192.168.1.1",
+            "serverIp": "10.0.0.1",
+            "referer": "https://example.com",
+            "latency": "0.5s",
+            "cacheLookup": true,
+            "cacheHit": false,
+            "protocol": "HTTP/1.1"
+        },
+        "trace": "projects/test-project/traces/1234567890abcdef",
+        "spanId": "abcdef1234567890",
+        "traceSampled": true,
+        "operation": {
+            "id": "op-123",
+            "producer": "test-producer",
+            "first": true,
+            "last": false
+        },
+        "sourceLocation": {
+            "file": "test.go",
+            "line": 42,
+            "function": "TestFunction"
+        },
+        "split": {
+            "uid": "split-123",
+            "index": 1,
+            "totalSplits": 3
+        }
+    }`
+
 func BenchmarkParse(b *testing.B) {
 	benchmarks := []struct {
 		name  string
@@ -290,6 +343,10 @@ func BenchmarkParse(b *testing.B) {
 					"tags": ["production", "verified", "premium"]
 				}
 			}`,
+		},
+		{
+			name:  "CloudLogging",
+			input: cloudLoggingPayload,
 		},
 	}
 
