@@ -172,7 +172,7 @@ func parseValue(s string) (Value, string, error) {
 }
 
 func parseArray(s string) (Value, string, error) {
-	var elements []Value
+	elements := make([]Value, 0, 32)
 
 	for i := 0; ; i++ {
 		if i != 0 {
@@ -181,7 +181,7 @@ func parseArray(s string) (Value, string, error) {
 				return Value{}, s, errUnexpectedEndOfArray
 			}
 			if token == "]" {
-				return makeArrayValue(elements), rest, nil
+				return makeArrayValue(slices.Clone(elements)), rest, nil
 			}
 			if token != "," {
 				return Value{}, s, fmt.Errorf("expected ',' or ']', got %q", token)
@@ -192,7 +192,7 @@ func parseArray(s string) (Value, string, error) {
 		v, rest, err := parseValue(s)
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
-				return makeArrayValue(elements), rest, nil
+				return makeArrayValue(slices.Clone(elements)), rest, nil
 			}
 			if err == errEndOfArray {
 				return Value{}, s, fmt.Errorf("unexpected ']' after ','")
@@ -200,16 +200,12 @@ func parseArray(s string) (Value, string, error) {
 			return Value{}, s, err
 		}
 		s = rest
-
-		if cap(elements) == 0 {
-			elements = make([]Value, 0, 8)
-		}
 		elements = append(elements, v)
 	}
 }
 
 func parseObject(s string) (Value, string, error) {
-	var fields []field
+	fields := make([]field, 0, 16)
 
 	for i := 0; ; i++ {
 		token, rest, ok := nextToken(s)
@@ -220,7 +216,7 @@ func parseObject(s string) (Value, string, error) {
 			slices.SortFunc(fields, func(a, b field) int {
 				return strings.Compare(a.k, b.k)
 			})
-			return makeObjectValue(fields), rest, nil
+			return makeObjectValue(slices.Clone(fields)), rest, nil
 		}
 		s = rest
 
@@ -254,10 +250,6 @@ func parseObject(s string) (Value, string, error) {
 			return Value{}, s, fmt.Errorf("%q → %w", key, err)
 		}
 		s = rest
-
-		if cap(fields) == 0 {
-			fields = make([]field, 0, 8)
-		}
 		fields = append(fields, field{k: key, v: val})
 	}
 }
