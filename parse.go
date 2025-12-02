@@ -14,13 +14,6 @@ var (
 	errUnexpectedEndOfArray  = errors.New("unexpected end of array")
 )
 
-// Tokenizer is a JSON tokenizer that splits input into tokens.
-// It skips whitespace and returns individual JSON tokens one at a time.
-type Tokenizer struct {
-	json   string
-	offset int
-}
-
 // whitespaceMap is a 256-bit lookup table for ASCII whitespace characters.
 // Bit i is set if byte i is whitespace (space, tab, newline, carriage return).
 var whitespaceMap = func() [4]uint64 {
@@ -51,13 +44,10 @@ func isDelimiter(c byte) bool {
 	return (delimiterMap[c/64] & (1 << (c % 64))) != 0
 }
 
-// skipWhitespace returns the index of the first non-whitespace byte in s[i:],
-// or len(s) if there are none.
-func skipWhitespace(s string, i int) int {
-	for i < len(s) && isWhitespace(s[i]) {
-		i++
-	}
-	return i
+// Tokenizer is a JSON tokenizer that splits input into tokens.
+// It skips whitespace and returns individual JSON tokens one at a time.
+type Tokenizer struct {
+	json string
 }
 
 // Tokenize creates a new Tokenizer for the given JSON string.
@@ -68,204 +58,206 @@ func Tokenize(json string) *Tokenizer {
 // Next returns the next token from the input.
 // Returns an empty string and false when there are no more tokens.
 func (t *Tokenizer) Next() (token string, ok bool) {
-	s := t.json
-	i := t.offset
+	token, t.json, ok = nextToken(t.json)
+	return token, ok
+}
 
-	if i == len(s) {
-		return
-	}
-
-	// Skip whitespace using optimized function
-	if s[i] <= 0x20 {
-		i = skipWhitespace(s, i)
-		if i == len(s) {
-			return
+// nextToken extracts the next JSON token from s.
+// Returns the token, the remaining string after the token, and whether a token was found.
+// All values are kept in registers - no heap allocation for tokenizer state.
+func nextToken(s string) (token, rest string, ok bool) {
+	// Skip leading whitespace using lookup table
+	switch {
+	case len(s) == 0:
+		return "", "", false
+	case s[0] <= ' ':
+		for isWhitespace(s[0]) {
+			if s = s[1:]; len(s) == 0 {
+				return "", "", false
+			}
 		}
 	}
 
-	j := i + 1
-	switch s[i] {
+	switch s[0] {
 	case '"':
 		// Find closing quote, handling escapes
+		j := 1
 		for {
 			k := strings.IndexByte(s[j:], '"')
 			if k < 0 {
-				j = len(s)
-				break
+				return s, "", true
 			}
 			j += k + 1
 			// Count preceding backslashes to check if quote is escaped
-			for k = j - 2; k > i && s[k] == '\\'; k-- {
+			n := 0
+			for i := j - 2; i > 0 && s[i] == '\\'; i-- {
+				n++
 			}
-			if (j-k)%2 == 0 {
-				break
+			if n%2 == 0 {
+				return s[:j], s[j:], true
 			}
 		}
 	case ',', ':', '[', ']', '{', '}':
-		// Single character tokens
+		return s[:1], s[1:], true
 	default:
-		// Numbers and literals: scan until delimiter
+		// Numbers and literals: scan until delimiter using lookup table
+		j := 1
 		for j < len(s) && !isDelimiter(s[j]) {
 			j++
 		}
+		return s[:j], s[j:], true
 	}
-
-	t.offset = j
-	return s[i:j], true
 }
 
 // Parse parses JSON data and returns a pointer to the root Value.
 // Returns an error if the JSON is malformed or empty.
 func Parse(data string) (*Value, error) {
-	tok := Tokenize(data)
-	v, err := parseTokens(tok)
+	v, rest, err := parseValue(data)
 	if err != nil {
 		return nil, err
 	}
 	// Check for trailing content after the root value
-	if extra, ok := tok.Next(); ok {
+	if extra, _, ok := nextToken(rest); ok {
 		return nil, fmt.Errorf("unexpected token after root value: %q", extra)
 	}
 	return &v, nil
 }
 
-func parseTokens(tokens *Tokenizer) (Value, error) {
-	token, ok := tokens.Next()
+// parseValue parses a JSON value from s.
+// Returns the parsed value, the remaining unparsed string, and any error.
+// The string is passed by value to keep it in registers.
+func parseValue(s string) (Value, string, error) {
+	token, rest, ok := nextToken(s)
 	if !ok {
-		return Value{}, errUnexpectedEndOfObject
+		return Value{}, rest, errUnexpectedEndOfObject
 	}
 	switch token[0] {
 	case 'n':
 		if token != "null" {
-			return Value{}, fmt.Errorf("invalid token: %q", token)
+			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeNullValue(), nil
+		return makeNullValue(), rest, nil
 	case 't':
 		if token != "true" {
-			return Value{}, fmt.Errorf("invalid token: %q", token)
+			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeTrueValue(), nil
+		return makeTrueValue(), rest, nil
 	case 'f':
 		if token != "false" {
-			return Value{}, fmt.Errorf("invalid token: %q", token)
+			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeFalseValue(), nil
+		return makeFalseValue(), rest, nil
 	case '"':
-		s, err := Unquote(token)
+		str, err := Unquote(token)
 		if err != nil {
-			return Value{}, fmt.Errorf("invalid token: %q", token)
+			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeStringValue(s), nil
+		return makeStringValue(str), rest, nil
 	case '[':
-		return parseArray(tokens)
+		return parseArray(rest)
 	case '{':
-		return parseObject(tokens)
+		return parseObject(rest)
 	case ']':
-		return Value{}, errEndOfArray
+		return Value{}, rest, errEndOfArray
 	case '}':
-		return Value{}, errEndOfObject
+		return Value{}, rest, errEndOfObject
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 		if !validNumber(token) {
-			return Value{}, fmt.Errorf("invalid number: %q", token)
+			return Value{}, rest, fmt.Errorf("invalid number: %q", token)
 		}
-		return makeNumberValue(token), nil
+		return makeNumberValue(token), rest, nil
 	default:
-		return Value{}, fmt.Errorf("invalid token: %q", token)
+		return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 	}
 }
 
-func parseArray(tokens *Tokenizer) (Value, error) {
+func parseArray(s string) (Value, string, error) {
 	var elements []Value
 
 	for i := 0; ; i++ {
 		if i != 0 {
-			token, ok := tokens.Next()
+			token, rest, ok := nextToken(s)
 			if !ok {
-				return Value{}, errUnexpectedEndOfArray
+				return Value{}, s, errUnexpectedEndOfArray
 			}
 			if token == "]" {
-				break
+				return makeArrayValue(elements), rest, nil
 			}
 			if token != "," {
-				return Value{}, fmt.Errorf("expected ',' or ']', got %q", token)
+				return Value{}, s, fmt.Errorf("expected ',' or ']', got %q", token)
 			}
+			s = rest
 		}
 
-		v, err := parseTokens(tokens)
+		v, rest, err := parseValue(s)
 		if err != nil {
-			// Only treat errEndOfArray as "empty array" if this is the first element
-			// AND we actually saw the ] token directly (not via a nested parse error).
-			// Since parseTokens returns errEndOfArray only when it directly sees ],
-			// and nested arrays that fail return their own errors, we need to check
-			// that err is exactly errEndOfArray and i == 0.
 			if i == 0 && err == errEndOfArray {
-				return makeArrayValue(elements), nil
+				return makeArrayValue(elements), rest, nil
 			}
-			// For trailing comma cases like [1,], we get errEndOfArray from parseTokens
-			// seeing ] after the comma - this is an error
 			if err == errEndOfArray {
-				return Value{}, fmt.Errorf("unexpected ']' after ','")
+				return Value{}, s, fmt.Errorf("unexpected ']' after ','")
 			}
-			return Value{}, err
+			return Value{}, s, err
 		}
+		s = rest
 
 		if cap(elements) == 0 {
 			elements = make([]Value, 0, 8)
 		}
 		elements = append(elements, v)
 	}
-
-	return makeArrayValue(elements), nil
 }
 
-func parseObject(tokens *Tokenizer) (Value, error) {
+func parseObject(s string) (Value, string, error) {
 	var fields []field
 
 	for i := 0; ; i++ {
-		token, ok := tokens.Next()
+		token, rest, ok := nextToken(s)
 		if !ok {
-			return Value{}, errUnexpectedEndOfObject
+			return Value{}, s, errUnexpectedEndOfObject
 		}
 		if token == "}" {
-			break
+			slices.SortFunc(fields, func(a, b field) int {
+				return strings.Compare(a.k, b.k)
+			})
+			return makeObjectValue(fields), rest, nil
 		}
+		s = rest
 
 		if i != 0 {
 			if token != "," {
-				return Value{}, fmt.Errorf("expected ',' or '}', got %q", token)
+				return Value{}, s, fmt.Errorf("expected ',' or '}', got %q", token)
 			}
-			token, ok = tokens.Next()
+			token, rest, ok = nextToken(s)
 			if !ok {
-				return Value{}, errUnexpectedEndOfObject
+				return Value{}, s, errUnexpectedEndOfObject
 			}
+			s = rest
 		}
 
 		key, err := Unquote(token)
 		if err != nil {
-			return Value{}, fmt.Errorf("invalid key: %q: %w", token, err)
+			return Value{}, s, fmt.Errorf("invalid key: %q: %w", token, err)
 		}
 
-		token, ok = tokens.Next()
+		token, rest, ok = nextToken(s)
 		if !ok {
-			return Value{}, errUnexpectedEndOfObject
+			return Value{}, s, errUnexpectedEndOfObject
 		}
 		if token != ":" {
-			return Value{}, fmt.Errorf("%q → expected ':', got %q", key, token)
+			return Value{}, s, fmt.Errorf("%q → expected ':', got %q", key, token)
 		}
+		s = rest
 
-		val, err := parseTokens(tokens)
+		val, rest, err := parseValue(s)
 		if err != nil {
-			return Value{}, fmt.Errorf("%q → %w", key, err)
+			return Value{}, s, fmt.Errorf("%q → %w", key, err)
 		}
+		s = rest
+
 		if cap(fields) == 0 {
 			fields = make([]field, 0, 8)
 		}
 		fields = append(fields, field{k: key, v: val})
 	}
-
-	slices.SortFunc(fields, func(a, b field) int {
-		return strings.Compare(a.k, b.k)
-	})
-
-	return makeObjectValue(fields), nil
 }

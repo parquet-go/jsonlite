@@ -206,14 +206,16 @@ func (it *Iterator) Value() (Value, error) {
 		}
 		return makeStringValue(s), nil
 	case Array:
-		val, err := parseArray(&it.tokens)
+		val, rest, err := parseArray(it.tokens.json)
+		it.tokens.json = rest
 		if err != nil {
 			it.setError(err)
 		}
 		it.pop()
 		return val, err
 	case Object:
-		val, err := parseObject(&it.tokens)
+		val, rest, err := parseObject(it.tokens.json)
+		it.tokens.json = rest
 		if err != nil {
 			it.setError(err)
 		}
