@@ -9,13 +9,14 @@ import (
 // It automatically handles control tokens (braces, brackets, colons, commas)
 // and presents only the logical JSON values to the caller.
 type Iterator struct {
-	tokens Tokenizer
-	token  string
-	kind   Kind
-	key    string
-	err    error
-	state  []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
-	bytes  [16]byte
+	tokens   Tokenizer
+	token    string
+	kind     Kind
+	key      string
+	err      error
+	state    []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
+	bytes    [16]byte
+	consumed bool // whether the current value has been consumed
 }
 
 // Iterate creates a new Iterator for the given JSON string.
@@ -23,6 +24,16 @@ func Iterate(json string) *Iterator {
 	it := &Iterator{tokens: Tokenizer{json: json}}
 	it.state = it.bytes[:0]
 	return it
+}
+
+// Reset resets the iterator to parse a new JSON string.
+func (it *Iterator) Reset(json string) {
+	it.tokens = Tokenizer{json: json}
+	it.token = ""
+	it.kind = 0
+	it.key = ""
+	it.err = nil
+	it.consumed = false
 }
 
 // Next advances the iterator to the next JSON value.
@@ -121,6 +132,7 @@ func (it *Iterator) setToken(token string) bool {
 	it.token = token
 	it.kind = kind
 	it.err = err
+	it.consumed = false
 
 	if err != nil {
 		return false
@@ -134,6 +146,52 @@ func (it *Iterator) setToken(token string) bool {
 	}
 
 	return true
+}
+
+func (it *Iterator) skip() {
+	it.consumed = true
+	switch it.kind {
+	case Array:
+		it.skipArray()
+	case Object:
+		it.skipObject()
+	}
+}
+
+func (it *Iterator) skipArray() {
+	depth := 1
+	for depth > 0 {
+		token, ok := it.tokens.Next()
+		if !ok {
+			it.setError(errUnexpectedEndOfArray)
+			return
+		}
+		switch token {
+		case "[":
+			depth++
+		case "]":
+			depth--
+		}
+	}
+	it.pop()
+}
+
+func (it *Iterator) skipObject() {
+	depth := 1
+	for depth > 0 {
+		token, ok := it.tokens.Next()
+		if !ok {
+			it.setError(errUnexpectedEndOfObject)
+			return
+		}
+		switch token {
+		case "{":
+			depth++
+		case "}":
+			depth--
+		}
+	}
+	it.pop()
 }
 
 func tokenKind(token string) (Kind, error) {
@@ -185,7 +243,14 @@ func (it *Iterator) Depth() int { return len(it.state) }
 // Value parses and returns the current value.
 // For arrays and objects, this consumes all nested tokens and returns the
 // complete parsed structure.
-func (it *Iterator) Value() (Value, error) {
+func (it *Iterator) Value() (*Value, error) {
+	val, err := it.value()
+	return &val, err
+}
+
+func (it *Iterator) value() (Value, error) {
+	it.consumed = true
+
 	if it.err != nil {
 		return Value{}, it.err
 	}
@@ -229,12 +294,19 @@ func (it *Iterator) Value() (Value, error) {
 // Object returns an iterator over the key-value pairs of the current object.
 // The iterator yields the key for each field, and the Iterator is positioned
 // on the field's value. Call Kind(), Value(), Object(), or Array() to process
-// the value.
+// the value. If the value is not consumed before the next iteration, it will
+// be automatically skipped.
 //
 // Must only be called when Kind() == Object.
 func (it *Iterator) Object() iter.Seq2[string, error] {
+	it.consumed = true // mark the object itself as consumed
 	return func(yield func(string, error) bool) {
 		for i := 0; ; i++ {
+			// Auto-consume the previous value if it wasn't consumed
+			if i != 0 && !it.consumed {
+				it.skip()
+			}
+
 			token, ok := it.tokens.Next()
 			if !ok {
 				it.setError(errUnexpectedEndOfObject)
@@ -300,12 +372,19 @@ func (it *Iterator) Object() iter.Seq2[string, error] {
 // Array returns an iterator over the elements of the current array.
 // The iterator yields the index for each element, and the Iterator is
 // positioned on the element's value. Call Kind(), Value(), Object(), or
-// Array() to process the value.
+// Array() to process the value. If the value is not consumed before the
+// next iteration, it will be automatically skipped.
 //
 // Must only be called when Kind() == Array.
 func (it *Iterator) Array() iter.Seq2[int, error] {
+	it.consumed = true // mark the array itself as consumed
 	return func(yield func(int, error) bool) {
 		for i := 0; ; i++ {
+			// Auto-consume the previous value if it wasn't consumed
+			if i != 0 && !it.consumed {
+				it.skip()
+			}
+
 			token, ok := it.tokens.Next()
 			if !ok {
 				it.setError(errUnexpectedEndOfArray)

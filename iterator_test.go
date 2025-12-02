@@ -359,3 +359,257 @@ func TestIteratorNestedObjectArray(t *testing.T) {
 		t.Errorf("expected second name 'Bob', got %q", names[1])
 	}
 }
+
+func TestIteratorObjectAutoConsume(t *testing.T) {
+	// Test that values are automatically consumed when not explicitly read
+	input := `{"a": [1, 2, 3], "b": {"nested": "object"}, "c": "simple"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var keys []string
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key)
+		// Deliberately NOT consuming any values
+	}
+
+	if len(keys) != 3 {
+		t.Fatalf("expected 3 keys, got %d", len(keys))
+	}
+
+	expected := []string{"a", "b", "c"}
+	for i, k := range keys {
+		if k != expected[i] {
+			t.Errorf("key %d: expected %q, got %q", i, expected[i], k)
+		}
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorArrayAutoConsume(t *testing.T) {
+	// Test that values are automatically consumed when not explicitly read
+	input := `[[1, 2], {"a": 1}, [3, 4], "simple"]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var count int
+	for _, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+		// Deliberately NOT consuming any values
+	}
+
+	if count != 4 {
+		t.Fatalf("expected 4 elements, got %d", count)
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorNestedAutoConsume(t *testing.T) {
+	// Test deeply nested auto-consume
+	input := `{"users": [{"name": "Alice", "tags": ["a", "b"]}, {"name": "Bob", "tags": ["c", "d"]}], "meta": {"count": 2}}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	// Only iterate over top-level keys, not consuming any values
+	var keys []string
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, key)
+	}
+
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(keys))
+	}
+
+	if keys[0] != "users" {
+		t.Errorf("expected first key 'users', got %q", keys[0])
+	}
+	if keys[1] != "meta" {
+		t.Errorf("expected second key 'meta', got %q", keys[1])
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorPartialConsume(t *testing.T) {
+	// Test that we can consume some values and auto-skip others
+	input := `{"name": "Alice", "skip_this": {"nested": [1,2,3]}, "age": 30}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	results := make(map[string]interface{})
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if key == "name" || key == "age" {
+			val, err := iter.Value()
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch key {
+			case "name":
+				results[key] = val.String()
+			case "age":
+				results[key] = val.Int()
+			}
+		}
+		// skip_this is not consumed, should be auto-skipped
+	}
+
+	if results["name"] != "Alice" {
+		t.Errorf("expected name='Alice', got %q", results["name"])
+	}
+	if results["age"] != int64(30) {
+		t.Errorf("expected age=30, got %v", results["age"])
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorArrayPartialConsume(t *testing.T) {
+	// Test that we can consume some elements and auto-skip others
+	input := `[1, [2, 3], 4, {"a": 5}, 6]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	var numbers []int64
+	for idx, err := range iter.Array() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Only consume simple numbers (indices 0, 2, 4)
+		if idx == 0 || idx == 2 || idx == 4 {
+			val, err := iter.Value()
+			if err != nil {
+				t.Fatal(err)
+			}
+			numbers = append(numbers, val.Int())
+		}
+		// Nested array and object are auto-skipped
+	}
+
+	expected := []int64{1, 4, 6}
+	if len(numbers) != len(expected) {
+		t.Fatalf("expected %d numbers, got %d", len(expected), len(numbers))
+	}
+	for i, n := range numbers {
+		if n != expected[i] {
+			t.Errorf("number %d: expected %d, got %d", i, expected[i], n)
+		}
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorEmptyRangeObject(t *testing.T) {
+	// Test that ranging over an object without consuming works
+	input := `{"a": 1, "b": 2, "c": 3}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	// Just range, don't use the values at all (testing the for range iter.Object() {} pattern)
+	count := 0
+	for range iter.Object() {
+		count++
+	}
+
+	if count != 3 {
+		t.Fatalf("expected 3 iterations, got %d", count)
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorEmptyRangeArray(t *testing.T) {
+	// Test that ranging over an array without consuming works
+	input := `[{"a": 1}, {"b": 2}, [3, 4, 5]]`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	// Just range, don't use the values at all (testing the for range iter.Array() {} pattern)
+	count := 0
+	for range iter.Array() {
+		count++
+	}
+
+	if count != 3 {
+		t.Fatalf("expected 3 iterations, got %d", count)
+	}
+
+	if iter.Err() != nil {
+		t.Errorf("unexpected error: %v", iter.Err())
+	}
+}
+
+func TestIteratorValueNoAlloc(t *testing.T) {
+	input := `{"name": "Alice", "age": 30, "active": true}`
+
+	// Create iterator outside the allocation measurement
+	// We're testing that Value() doesn't allocate, not Iterate()
+	iter := jsonlite.Iterate(input)
+
+	allocs := testing.AllocsPerRun(100, func() {
+		iter.Reset(input)
+
+		if !iter.Next() {
+			t.Fatal("expected at least one value")
+		}
+		for _, err := range iter.Object() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			val, err := iter.Value()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = val
+		}
+	})
+
+	if allocs != 0 {
+		t.Errorf("expected 0 allocations, got %v", allocs)
+	}
+}
