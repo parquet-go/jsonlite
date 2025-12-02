@@ -3,6 +3,9 @@ package jsonlite
 import (
 	"fmt"
 	"iter"
+	"math"
+	"strconv"
+	"time"
 )
 
 // Iterator provides a streaming interface for traversing JSON values.
@@ -148,16 +151,6 @@ func (it *Iterator) setToken(token string) bool {
 	return true
 }
 
-func (it *Iterator) skip() {
-	it.consumed = true
-	switch it.kind {
-	case Array:
-		it.skipArray()
-	case Object:
-		it.skipObject()
-	}
-}
-
 func (it *Iterator) skipArray() {
 	depth := 1
 	for depth > 0 {
@@ -249,8 +242,6 @@ func (it *Iterator) Value() (*Value, error) {
 }
 
 func (it *Iterator) value() (Value, error) {
-	it.consumed = true
-
 	if it.err != nil {
 		return Value{}, it.err
 	}
@@ -272,7 +263,7 @@ func (it *Iterator) value() (Value, error) {
 		return makeStringValue(s), nil
 	case Array:
 		val, rest, err := parseArray(it.tokens.json)
-		it.tokens.json = rest
+		it.tokens.json, it.consumed = rest, true
 		if err != nil {
 			it.setError(err)
 		}
@@ -280,7 +271,7 @@ func (it *Iterator) value() (Value, error) {
 		return val, err
 	case Object:
 		val, rest, err := parseObject(it.tokens.json)
-		it.tokens.json = rest
+		it.tokens.json, it.consumed = rest, true
 		if err != nil {
 			it.setError(err)
 		}
@@ -288,6 +279,117 @@ func (it *Iterator) value() (Value, error) {
 		return val, err
 	default:
 		return Value{}, fmt.Errorf("unexpected kind: %v", it.kind)
+	}
+}
+
+// Bool returns the current value as a boolean.
+// Returns an error if the value is not a boolean or a string that can be parsed as a boolean.
+func (it *Iterator) Bool() (bool, error) {
+	switch it.kind {
+	case True:
+		return true, nil
+	case False:
+		return false, nil
+	case String:
+		s, err := Unquote(it.token)
+		if err != nil {
+			return false, fmt.Errorf("invalid string: %q", it.token)
+		}
+		return strconv.ParseBool(s)
+	default:
+		return false, fmt.Errorf("cannot convert %v to bool", it.kind)
+	}
+}
+
+// Int returns the current value as a signed 64-bit integer.
+// Returns an error if the value is not a number or a string that can be parsed as an integer.
+func (it *Iterator) Int() (int64, error) {
+	switch it.kind {
+	case Number:
+		return strconv.ParseInt(it.token, 10, 64)
+	case String:
+		s, err := Unquote(it.token)
+		if err != nil {
+			return 0, fmt.Errorf("invalid string: %q", it.token)
+		}
+		return strconv.ParseInt(s, 10, 64)
+	default:
+		return 0, fmt.Errorf("cannot convert %v to int", it.kind)
+	}
+}
+
+// Float returns the current value as a 64-bit floating point number.
+// Returns an error if the value is not a number or a string that can be parsed as a float.
+func (it *Iterator) Float() (float64, error) {
+	switch it.kind {
+	case Number:
+		return strconv.ParseFloat(it.token, 64)
+	case String:
+		s, err := Unquote(it.token)
+		if err != nil {
+			return 0, fmt.Errorf("invalid string: %q", it.token)
+		}
+		return strconv.ParseFloat(s, 64)
+	default:
+		return 0, fmt.Errorf("cannot convert %v to float", it.kind)
+	}
+}
+
+// String returns the current value as a string.
+// Returns an error if the value is not a string.
+func (it *Iterator) String() (string, error) {
+	switch it.kind {
+	case String:
+		return Unquote(it.token)
+	default:
+		return "", fmt.Errorf("cannot convert %v to string", it.kind)
+	}
+}
+
+// Duration returns the current value as a time.Duration.
+// For numbers, the value is interpreted as seconds.
+// For strings, the value is parsed using time.ParseDuration.
+// Returns an error if the value cannot be converted to a duration.
+func (it *Iterator) Duration() (time.Duration, error) {
+	switch it.kind {
+	case Number:
+		f, err := strconv.ParseFloat(it.token, 64)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(f * float64(time.Second)), nil
+	case String:
+		s, err := Unquote(it.token)
+		if err != nil {
+			return 0, fmt.Errorf("invalid string: %q", it.token)
+		}
+		return time.ParseDuration(s)
+	default:
+		return 0, fmt.Errorf("cannot convert %v to duration", it.kind)
+	}
+}
+
+// Time returns the current value as a time.Time.
+// For numbers, the value is interpreted as seconds since Unix epoch.
+// For strings, the value is parsed using RFC3339 format.
+// Returns an error if the value cannot be converted to a time.
+func (it *Iterator) Time() (time.Time, error) {
+	switch it.kind {
+	case Number:
+		f, err := strconv.ParseFloat(it.token, 64)
+		if err != nil {
+			return time.Time{}, err
+		}
+		sec, frac := math.Modf(f)
+		return time.Unix(int64(sec), int64(frac*1e9)).UTC(), nil
+	case String:
+		s, err := Unquote(it.token)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid string: %q", it.token)
+		}
+		return time.Parse(time.RFC3339, s)
+	default:
+		return time.Time{}, fmt.Errorf("cannot convert %v to time", it.kind)
 	}
 }
 
@@ -303,8 +405,15 @@ func (it *Iterator) Object() iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		for i := 0; ; i++ {
 			// Auto-consume the previous value if it wasn't consumed
-			if i != 0 && !it.consumed {
-				it.skip()
+			if i != 0 {
+				switch it.kind {
+				case Array:
+					it.consumed = true
+					it.skipArray()
+				case Object:
+					it.consumed = true
+					it.skipObject()
+				}
 			}
 
 			token, ok := it.tokens.Next()
@@ -381,8 +490,15 @@ func (it *Iterator) Array() iter.Seq2[int, error] {
 	return func(yield func(int, error) bool) {
 		for i := 0; ; i++ {
 			// Auto-consume the previous value if it wasn't consumed
-			if i != 0 && !it.consumed {
-				it.skip()
+			if i != 0 {
+				switch it.kind {
+				case Array:
+					it.consumed = true
+					it.skipArray()
+				case Object:
+					it.consumed = true
+					it.skipObject()
+				}
 			}
 
 			token, ok := it.tokens.Next()

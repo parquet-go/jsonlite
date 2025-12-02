@@ -1,7 +1,10 @@
 package jsonlite_test
 
 import (
+	"fmt"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/parquet-go/jsonlite"
 )
@@ -611,5 +614,302 @@ func TestIteratorValueNoAlloc(t *testing.T) {
 
 	if allocs != 0 {
 		t.Errorf("expected 0 allocations, got %v", allocs)
+	}
+}
+
+func TestIteratorBool(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+		wantErr  bool
+	}{
+		{`true`, true, false},
+		{`false`, false, false},
+		{`"true"`, true, false},
+		{`"false"`, false, false},
+		{`"1"`, true, false},
+		{`"0"`, false, false},
+		{`123`, false, true},
+		{`null`, false, true},
+		{`"invalid"`, false, true},
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got, err := iter.Bool()
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("iterate %q: expected error, got %v", tt.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("iterate %q: unexpected error: %v", tt.input, err)
+			} else if got != tt.expected {
+				t.Errorf("iterate %q: expected %v, got %v", tt.input, tt.expected, got)
+			}
+		}
+	}
+}
+
+func TestIteratorInt(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+		wantErr  bool
+	}{
+		{`42`, 42, false},
+		{`-123`, -123, false},
+		{`0`, 0, false},
+		{`"42"`, 42, false},
+		{`"-123"`, -123, false},
+		{`"0"`, 0, false},
+		{`3.14`, 0, true},  // float is not a valid int
+		{`true`, 0, true},  // bool is not valid
+		{`null`, 0, true},  // null is not valid
+		{`"abc"`, 0, true}, // non-numeric string
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got, err := iter.Int()
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("iterate %q: expected error, got %v", tt.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("iterate %q: unexpected error: %v", tt.input, err)
+			} else if got != tt.expected {
+				t.Errorf("iterate %q: expected %v, got %v", tt.input, tt.expected, got)
+			}
+		}
+	}
+}
+
+func TestIteratorFloat(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected float64
+		wantErr  bool
+	}{
+		{`3.14`, 3.14, false},
+		{`42`, 42.0, false},
+		{`-123.456`, -123.456, false},
+		{`0`, 0.0, false},
+		{`1e10`, 1e10, false},
+		{`"3.14"`, 3.14, false},
+		{`"42"`, 42.0, false},
+		{`"-123.456"`, -123.456, false},
+		{`true`, 0, true},  // bool is not valid
+		{`null`, 0, true},  // null is not valid
+		{`"abc"`, 0, true}, // non-numeric string
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got, err := iter.Float()
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("iterate %q: expected error, got %v", tt.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("iterate %q: unexpected error: %v", tt.input, err)
+			} else if got != tt.expected {
+				t.Errorf("iterate %q: expected %v, got %v", tt.input, tt.expected, got)
+			}
+		}
+	}
+}
+
+func TestIteratorString(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{`"hello"`, "hello", false},
+		{`""`, "", false},
+		{`"hello world"`, "hello world", false},
+		{`"with\nnewline"`, "with\nnewline", false},
+		{`"with\ttab"`, "with\ttab", false},
+		{`42`, "", true},    // number is not valid
+		{`true`, "", true},  // bool is not valid
+		{`null`, "", true},  // null is not valid
+		{`[1,2]`, "", true}, // array is not valid
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got, err := iter.String()
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("iterate %q: expected error, got %q", tt.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("iterate %q: unexpected error: %v", tt.input, err)
+			} else if got != tt.expected {
+				t.Errorf("iterate %q: expected %q, got %q", tt.input, tt.expected, got)
+			}
+		}
+	}
+}
+
+func TestIteratorDuration(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected time.Duration
+		wantErr  bool
+	}{
+		{`1`, time.Second, false},
+		{`0.5`, 500 * time.Millisecond, false},
+		{`60`, time.Minute, false},
+		{`3600`, time.Hour, false},
+		{`"1s"`, time.Second, false},
+		{`"500ms"`, 500 * time.Millisecond, false},
+		{`"1m"`, time.Minute, false},
+		{`"1h"`, time.Hour, false},
+		{`"1h30m"`, 90 * time.Minute, false},
+		{`true`, 0, true},     // bool is not valid
+		{`null`, 0, true},     // null is not valid
+		{`"invalid"`, 0, true}, // invalid duration string
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got, err := iter.Duration()
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("iterate %q: expected error, got %v", tt.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("iterate %q: unexpected error: %v", tt.input, err)
+			} else if got != tt.expected {
+				t.Errorf("iterate %q: expected %v, got %v", tt.input, tt.expected, got)
+			}
+		}
+	}
+}
+
+func TestIteratorTime(t *testing.T) {
+	refTime := time.Date(2023, 6, 15, 12, 30, 45, 0, time.UTC)
+	unixTime := float64(refTime.Unix())
+
+	tests := []struct {
+		input    string
+		expected time.Time
+		wantErr  bool
+	}{
+		{fmt.Sprintf(`%v`, unixTime), refTime, false},
+		{`0`, time.Unix(0, 0).UTC(), false},
+		{`"2023-06-15T12:30:45Z"`, refTime, false},
+		{`"2023-06-15T12:30:45+00:00"`, refTime, false},
+		{`true`, time.Time{}, true},     // bool is not valid
+		{`null`, time.Time{}, true},     // null is not valid
+		{`"invalid"`, time.Time{}, true}, // invalid time string
+		{`"2023-06-15"`, time.Time{}, true}, // wrong format (not RFC3339)
+	}
+
+	for _, tt := range tests {
+		iter := jsonlite.Iterate(tt.input)
+		if !iter.Next() {
+			t.Fatalf("iterate %q: expected value", tt.input)
+		}
+		got, err := iter.Time()
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("iterate %q: expected error, got %v", tt.input, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("iterate %q: unexpected error: %v", tt.input, err)
+			} else if !got.Equal(tt.expected) {
+				t.Errorf("iterate %q: expected %v, got %v", tt.input, tt.expected, got)
+			}
+		}
+	}
+}
+
+func TestIteratorTypedValuesInObject(t *testing.T) {
+	input := `{"name": "Alice", "age": 30, "score": 95.5, "active": true, "duration": "1h30m", "created": "2023-06-15T12:30:45Z"}`
+	iter := jsonlite.Iterate(input)
+
+	if !iter.Next() {
+		t.Fatal("expected at least one value")
+	}
+
+	results := make(map[string]interface{})
+	for key, err := range iter.Object() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch key {
+		case "name":
+			v, err := iter.String()
+			if err != nil {
+				t.Fatalf("String() error: %v", err)
+			}
+			results[key] = v
+		case "age":
+			v, err := iter.Int()
+			if err != nil {
+				t.Fatalf("Int() error: %v", err)
+			}
+			results[key] = v
+		case "score":
+			v, err := iter.Float()
+			if err != nil {
+				t.Fatalf("Float() error: %v", err)
+			}
+			results[key] = v
+		case "active":
+			v, err := iter.Bool()
+			if err != nil {
+				t.Fatalf("Bool() error: %v", err)
+			}
+			results[key] = v
+		case "duration":
+			v, err := iter.Duration()
+			if err != nil {
+				t.Fatalf("Duration() error: %v", err)
+			}
+			results[key] = v
+		case "created":
+			v, err := iter.Time()
+			if err != nil {
+				t.Fatalf("Time() error: %v", err)
+			}
+			results[key] = v
+		}
+	}
+
+	expected := map[string]interface{}{
+		"name":     "Alice",
+		"age":      int64(30),
+		"score":    95.5,
+		"active":   true,
+		"duration": 90 * time.Minute,
+		"created":  time.Date(2023, 6, 15, 12, 30, 45, 0, time.UTC),
+	}
+
+	if !reflect.DeepEqual(results, expected) {
+		t.Errorf("expected %v, got %v", expected, results)
 	}
 }
