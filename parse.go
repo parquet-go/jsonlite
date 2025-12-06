@@ -148,11 +148,11 @@ func parseValue(s string) (Value, string, error) {
 		}
 		return makeFalseValue(token[:5]), rest, nil
 	case '"':
-		str, err := Unquote(token)
-		if err != nil {
+		// Validate the quoted string but store the quoted token
+		if !validString(token) {
 			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeStringValue(str), rest, nil
+		return makeStringValue(token), rest, nil
 	case '[':
 		return parseArray(s, rest)
 	case '{':

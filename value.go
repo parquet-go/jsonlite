@@ -41,6 +41,12 @@ const (
 )
 
 // Value represents a JSON value of any type.
+//
+// Value instances as immutable, they can be safely accessed from multiple
+// goroutines.
+//
+// The zero-value of Value is invalid, all Value instances must be acquired
+// form Parse or from an Iterator.
 type Value struct {
 	p unsafe.Pointer
 	n uintptr
@@ -63,7 +69,10 @@ func (v *Value) Kind() Kind {
 // Panics if called on other types.
 func (v *Value) Len() int {
 	switch v.Kind() {
-	case String, Number:
+	case String:
+		// String values now store quoted JSON - subtract 2 for quotes
+		return int(v.n&kindMask) - 2
+	case Number:
 		return int(v.n & kindMask)
 	case Array, Object:
 		// First element/field is always cached JSON
@@ -79,7 +88,7 @@ func (v *Value) Int() int64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Int called on non-number value")
 	}
-	i, err := strconv.ParseInt(v.string(), 10, 64)
+	i, err := strconv.ParseInt(v.json(), 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -92,7 +101,7 @@ func (v *Value) Uint() uint64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Uint called on non-number value")
 	}
-	u, err := strconv.ParseUint(v.string(), 10, 64)
+	u, err := strconv.ParseUint(v.json(), 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -105,7 +114,7 @@ func (v *Value) Float() float64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Float called on non-number value")
 	}
-	f, err := strconv.ParseFloat(v.string(), 64)
+	f, err := strconv.ParseFloat(v.json(), 64)
 	if err != nil {
 		panic(err)
 	}
@@ -117,10 +126,27 @@ func (v *Value) Float() float64 {
 // For other types, returns the JSON representation.
 func (v *Value) String() string {
 	switch v.Kind() {
-	case String, Number, Null, True, False:
-		return v.string()
+	case Null:
+		return "<nil>"
+	case String:
+		s, _ := Unquote(v.json())
+		return s
+	case Number, True, False:
+		return v.json()
 	case Array:
-		return (*Value)(v.p).string()
+		return (*Value)(v.p).json()
+	default:
+		return (*field)(v.p).k
+	}
+}
+
+// JSON returns the JSON representation of the value.
+func (v *Value) JSON() string {
+	switch v.Kind() {
+	case String, Number, Null, True, False:
+		return v.json()
+	case Array:
+		return (*Value)(v.p).json()
 	default:
 		return (*field)(v.p).k
 	}
@@ -189,7 +215,7 @@ func (v *Value) NumberType() NumberType {
 	if v.Kind() != Number {
 		panic("jsonlite: NumberType called on non-number value")
 	}
-	return NumberTypeOf(v.string())
+	return NumberTypeOf(v.json())
 }
 
 // Number returns the value as a json.Number.
@@ -198,10 +224,10 @@ func (v *Value) Number() json.Number {
 	if v.Kind() != Number {
 		panic("jsonlite: Number called on non-number value")
 	}
-	return json.Number(v.string())
+	return json.Number(v.json())
 }
 
-func (v *Value) string() string {
+func (v *Value) json() string {
 	return unsafe.String((*byte)(v.p), v.len())
 }
 
@@ -293,7 +319,7 @@ func AsBool(v *Value) bool {
 		case True:
 			return true
 		case Number:
-			f, err := strconv.ParseFloat(v.string(), 64)
+			f, err := strconv.ParseFloat(v.json(), 64)
 			return err == nil && f != 0
 		case String, Object, Array:
 			return v.Len() > 0
@@ -308,13 +334,8 @@ func AsBool(v *Value) bool {
 // Returns the raw value for numbers and strings.
 // Returns the JSON representation for objects and arrays.
 func AsString(v *Value) string {
-	if v != nil {
-		switch v.Kind() {
-		case True, False, Number, String:
-			return v.string()
-		case Object, Array:
-			return string(v.Append(nil))
-		}
+	if v != nil && v.Kind() != Null {
+		return v.String()
 	}
 	return ""
 }
@@ -328,11 +349,21 @@ func AsInt(v *Value) int64 {
 		switch v.Kind() {
 		case True:
 			return 1
-		case Number, String:
-			if i, err := strconv.ParseInt(v.string(), 10, 64); err == nil {
+		case Number:
+			if i, err := strconv.ParseInt(v.json(), 10, 64); err == nil {
 				return i
 			}
-			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.json(), 64); err == nil {
+				return int64(f)
+			}
+		case String:
+			// Strip surrounding quotes - no escapes in valid number strings
+			s := v.json()
+			s = s[1 : len(s)-1]
+			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return i
+			}
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
 				return int64(f)
 			}
 		}
@@ -349,11 +380,23 @@ func AsUint(v *Value) uint64 {
 		switch v.Kind() {
 		case True:
 			return 1
-		case Number, String:
-			if u, err := strconv.ParseUint(v.string(), 10, 64); err == nil {
+		case Number:
+			if u, err := strconv.ParseUint(v.json(), 10, 64); err == nil {
 				return u
 			}
-			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.json(), 64); err == nil {
+				if f >= 0 {
+					return uint64(f)
+				}
+			}
+		case String:
+			// Strip surrounding quotes - no escapes in valid number strings
+			s := v.json()
+			s = s[1 : len(s)-1]
+			if u, err := strconv.ParseUint(s, 10, 64); err == nil {
+				return u
+			}
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
 				if f >= 0 {
 					return uint64(f)
 				}
@@ -372,8 +415,15 @@ func AsFloat(v *Value) float64 {
 		switch v.Kind() {
 		case True:
 			return 1
-		case Number, String:
-			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
+		case Number:
+			if f, err := strconv.ParseFloat(v.json(), 64); err == nil {
+				return f
+			}
+		case String:
+			// Strip surrounding quotes - no escapes in valid number strings
+			s := v.json()
+			s = s[1 : len(s)-1]
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
 				return f
 			}
 		}
@@ -391,11 +441,14 @@ func AsDuration(v *Value) time.Duration {
 		case True:
 			return time.Second
 		case Number:
-			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.json(), 64); err == nil {
 				return time.Duration(f * float64(time.Second))
 			}
 		case String:
-			if d, err := time.ParseDuration(v.string()); err == nil {
+			// Strip surrounding quotes - no escapes in valid duration strings
+			s := v.json()
+			s = s[1 : len(s)-1]
+			if d, err := time.ParseDuration(s); err == nil {
 				return d
 			}
 		}
@@ -411,12 +464,15 @@ func AsTime(v *Value) time.Time {
 	if v != nil {
 		switch v.Kind() {
 		case Number:
-			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.json(), 64); err == nil {
 				sec, frac := math.Modf(f)
 				return time.Unix(int64(sec), int64(frac*1e9)).UTC()
 			}
 		case String:
-			if t, err := time.ParseInLocation(time.RFC3339, v.string(), time.UTC); err == nil {
+			// Strip surrounding quotes - no escapes in valid RFC3339 time strings
+			s := v.json()
+			s = s[1 : len(s)-1]
+			if t, err := time.ParseInLocation(time.RFC3339, s, time.UTC); err == nil {
 				return t
 			}
 		}
@@ -428,16 +484,12 @@ func AsTime(v *Value) time.Time {
 // Returns the extended buffer.
 func (v *Value) Append(buf []byte) []byte {
 	switch v.Kind() {
-	case String:
-		return AppendQuote(buf, v.string())
-	case Number, Null, True, False:
-		return append(buf, v.string()...)
+	case String, Number, Null, True, False:
+		return append(buf, v.json()...)
 	case Array:
-		return append(buf, (*Value)(v.p).string()...)
-	case Object:
-		return append(buf, (*field)(v.p).k...)
+		return append(buf, (*Value)(v.p).json()...)
 	default:
-		return buf
+		return append(buf, (*field)(v.p).k...)
 	}
 }
 
@@ -446,10 +498,8 @@ func (v *Value) Append(buf []byte) []byte {
 // use cached JSON and always regenerates the output.
 func (v *Value) Compact(buf []byte) []byte {
 	switch v.Kind() {
-	case Null, True, False, Number:
-		return append(buf, v.string()...)
-	case String:
-		return AppendQuote(buf, v.string())
+	case String, Null, True, False, Number:
+		return append(buf, v.json()...)
 	case Array:
 		buf = append(buf, '[')
 		var count int
@@ -461,7 +511,7 @@ func (v *Value) Compact(buf []byte) []byte {
 			count++
 		}
 		return append(buf, ']')
-	case Object:
+	default:
 		buf = append(buf, '{')
 		var count int
 		for k, v := range v.Object() {
@@ -474,7 +524,5 @@ func (v *Value) Compact(buf []byte) []byte {
 			count++
 		}
 		return append(buf, '}')
-	default:
-		return buf
 	}
 }

@@ -198,7 +198,7 @@ func TestStringReturnsJSON(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"null", "null"},
+		{"null", "<nil>"},
 		{"true", "true"},
 		{"false", "false"},
 		{"[1,2,3]", "[1,2,3]"},

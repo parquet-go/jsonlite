@@ -255,11 +255,11 @@ func (it *Iterator) value() (Value, error) {
 	case Null, True, False, Number:
 		return makeValue(it.kind, it.token), nil
 	case String:
-		s, err := Unquote(it.token)
-		if err != nil {
+		// Validate the quoted string but store the quoted token
+		if !validString(it.token) {
 			return Value{}, fmt.Errorf("invalid string: %q", it.token)
 		}
-		return makeStringValue(s), nil
+		return makeStringValue(it.token), nil
 	case Array:
 		delimi := len(it.token)
 		offset := len(it.json) - len(it.tokens.json) - delimi
