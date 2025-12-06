@@ -13,6 +13,7 @@ import (
 // and presents only the logical JSON values to the caller.
 type Iterator struct {
 	tokens   Tokenizer
+	json     string // Original JSON for computing pre-token positions
 	token    string
 	kind     Kind
 	key      string
@@ -24,7 +25,10 @@ type Iterator struct {
 
 // Iterate creates a new Iterator for the given JSON string.
 func Iterate(json string) *Iterator {
-	it := &Iterator{tokens: Tokenizer{json: json}}
+	it := &Iterator{
+		tokens: Tokenizer{json: json},
+		json:   json, // Store original JSON
+	}
 	it.state = it.bytes[:0]
 	return it
 }
@@ -32,6 +36,7 @@ func Iterate(json string) *Iterator {
 // Reset resets the iterator to parse a new JSON string.
 func (it *Iterator) Reset(json string) {
 	it.tokens = Tokenizer{json: json}
+	it.json = json
 	it.token = ""
 	it.kind = 0
 	it.key = ""
@@ -262,7 +267,9 @@ func (it *Iterator) value() (Value, error) {
 		}
 		return makeStringValue(s), nil
 	case Array:
-		val, rest, err := parseArray(it.tokens.json)
+		delimi := len(it.token)
+		offset := len(it.json) - len(it.tokens.json) - delimi
+		val, rest, err := parseArray(it.json[offset:], it.tokens.json)
 		it.tokens.json, it.consumed = rest, true
 		if err != nil {
 			it.setError(err)
@@ -270,7 +277,9 @@ func (it *Iterator) value() (Value, error) {
 		it.pop()
 		return val, err
 	case Object:
-		val, rest, err := parseObject(it.tokens.json)
+		delimi := len(it.token)
+		offset := len(it.json) - len(it.tokens.json) - delimi
+		val, rest, err := parseObject(it.json[offset:], it.tokens.json)
 		it.tokens.json, it.consumed = rest, true
 		if err != nil {
 			it.setError(err)

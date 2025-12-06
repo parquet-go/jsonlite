@@ -1,6 +1,8 @@
 package jsonlite_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,6 +250,124 @@ func TestSerializeRoundTrip(t *testing.T) {
 		if !valuesEqual(*val, *val2) {
 			t.Errorf("round-trip failed for %q\ngot: %s", input, serialized)
 		}
+	}
+}
+
+func TestAppend(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string // Expected output should match input exactly
+	}{
+		{"null", "null", "null"},
+		{"true", "true", "true"},
+		{"false", "false", "false"},
+		{"number", "42", "42"},
+		{"float", "3.14", "3.14"},
+		{"string", `"hello"`, `"hello"`},
+		{"empty array", "[]", "[]"},
+		{"array", "[1,2,3]", "[1,2,3]"},
+		{"array with spaces", "[ 1 , 2 , 3 ]", "[ 1 , 2 , 3 ]"},
+		{"empty object", "{}", "{}"},
+		{"object", `{"a":1}`, `{"a":1}`},
+		{"object with spaces", `{ "a" : 1 }`, `{ "a" : 1 }`},
+		{"nested", `{"array":[1,2,3],"object":{"nested":true}}`, `{"array":[1,2,3],"object":{"nested":true}}`},
+		{"nested with whitespace", `{ "array" : [ 1 , 2 ] }`, `{ "array" : [ 1 , 2 ] }`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+
+			result := string(val.Append(nil))
+			if result != tt.expected {
+				t.Errorf("Append() = %q, want %q", result, tt.expected)
+			}
+
+			// Verify the output is valid JSON
+			_, err = jsonlite.Parse(result)
+			if err != nil {
+				t.Errorf("Append() produced invalid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompact(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string // Expected compacted output
+	}{
+		{"null", "null", "null"},
+		{"true", "true", "true"},
+		{"false", "false", "false"},
+		{"number", "42", "42"},
+		{"float", "3.14", "3.14"},
+		{"string", `"hello"`, `"hello"`},
+		{"empty array", "[]", "[]"},
+		{"array", "[1,2,3]", "[1,2,3]"},
+		{"array with spaces", "[ 1 , 2 , 3 ]", "[1,2,3]"},
+		{"empty object", "{}", "{}"},
+		{"object", `{"a":1}`, `{"a":1}`},
+		{"object with spaces", `{ "a" : 1 }`, `{"a":1}`},
+		{"nested", `{"array":[1,2,3],"object":{"nested":true}}`, `{"array":[1,2,3],"object":{"nested":true}}`},
+		{"nested with whitespace", `{ "array" : [ 1 , 2 ] }`, `{"array":[1,2]}`},
+		{"complex object", `{ "a" : 1 , "b" : "hello" , "c" : true }`, `{"a":1,"b":"hello","c":true}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+
+			result := string(val.Compact(nil))
+			if result != tt.expected {
+				t.Errorf("Compact() = %q, want %q", result, tt.expected)
+			}
+
+			// Verify the output is valid JSON
+			_, err = jsonlite.Parse(result)
+			if err != nil {
+				t.Errorf("Compact() produced invalid JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestAppendVsCompact(t *testing.T) {
+	// Test that Append preserves formatting while Compact removes it
+	input := `{ "array" : [ 1 , 2 , 3 ] , "object" : { "nested" : true } }`
+
+	val, err := jsonlite.Parse(input)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	appended := string(val.Append(nil))
+	compacted := string(val.Compact(nil))
+
+	// Append should preserve the original formatting
+	if appended != input {
+		t.Errorf("Append() did not preserve formatting:\ngot:  %q\nwant: %q", appended, input)
+	}
+
+	// Compact should remove whitespace
+	expectedCompact := `{"array":[1,2,3],"object":{"nested":true}}`
+	if compacted != expectedCompact {
+		t.Errorf("Compact() did not remove whitespace:\ngot:  %q\nwant: %q", compacted, expectedCompact)
+	}
+
+	// Both should produce semantically equivalent values
+	val1, _ := jsonlite.Parse(appended)
+	val2, _ := jsonlite.Parse(compacted)
+	if !valuesEqual(*val1, *val2) {
+		t.Error("Append() and Compact() produced semantically different values")
 	}
 }
 
@@ -837,5 +957,159 @@ func TestAsTime(t *testing.T) {
 
 	if got := jsonlite.AsTime(nil); !got.IsZero() {
 		t.Errorf("AsTime(nil) = %v, want zero time", got)
+	}
+}
+
+func BenchmarkLookup(b *testing.B) {
+	sizes := []int{1, 10, 25, 100}
+
+	for _, size := range sizes {
+		// Generate object with 'size' fields
+		// Use keys that sort alphabetically: field_000, field_001, etc.
+		fields := make([]string, size)
+		for i := 0; i < size; i++ {
+			fields[i] = fmt.Sprintf(`"field_%03d":%d`, i, i)
+		}
+		json := "{" + strings.Join(fields, ",") + "}"
+
+		val, err := jsonlite.Parse(json)
+		if err != nil {
+			b.Fatalf("parse failed: %v", err)
+		}
+
+		// Benchmark looking up first field (best case - early in sorted list)
+		b.Run(fmt.Sprintf("First_%dfields", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				result := val.Lookup("field_000")
+				if result == nil {
+					b.Fatal("expected to find field_000")
+				}
+			}
+		})
+
+		// Benchmark looking up middle field
+		if size > 1 {
+			middleKey := fmt.Sprintf("field_%03d", size/2)
+			b.Run(fmt.Sprintf("Middle_%dfields", size), func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					result := val.Lookup(middleKey)
+					if result == nil {
+						b.Fatalf("expected to find %s", middleKey)
+					}
+				}
+			})
+		}
+
+		// Benchmark looking up last field (worst case - late in sorted list)
+		lastKey := fmt.Sprintf("field_%03d", size-1)
+		b.Run(fmt.Sprintf("Last_%dfields", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				result := val.Lookup(lastKey)
+				if result == nil {
+					b.Fatalf("expected to find %s", lastKey)
+				}
+			}
+		})
+
+		// Benchmark looking up non-existent field
+		b.Run(fmt.Sprintf("NotFound_%dfields", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				result := val.Lookup("nonexistent")
+				if result != nil {
+					b.Fatal("expected nil for nonexistent field")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkAppendVsCompact(b *testing.B) {
+	tests := []struct {
+		name string
+		json string
+	}{
+		{
+			name: "SimpleObject",
+			json: `{"a":1,"b":"hello","c":true}`,
+		},
+		{
+			name: "SimpleArray",
+			json: `[1,2,3,4,5,6,7,8,9,10]`,
+		},
+		{
+			name: "ObjectWithWhitespace",
+			json: `{ "a" : 1 , "b" : "hello" , "c" : true , "d" : null }`,
+		},
+		{
+			name: "NestedObject",
+			json: `{"user":{"name":"John","age":30,"address":{"street":"Main St","city":"NYC"}}}`,
+		},
+		{
+			name: "NestedArray",
+			json: `[[1,2,3],[4,5,6],[7,8,9]]`,
+		},
+		{
+			name: "LargeObject",
+			json: func() string {
+				fields := make([]string, 100)
+				for i := 0; i < 100; i++ {
+					fields[i] = fmt.Sprintf(`"field_%d":%d`, i, i)
+				}
+				return "{" + strings.Join(fields, ",") + "}"
+			}(),
+		},
+		{
+			name: "LargeArray",
+			json: func() string {
+				elements := make([]string, 100)
+				for i := 0; i < 100; i++ {
+					elements[i] = fmt.Sprintf("%d", i)
+				}
+				return "[" + strings.Join(elements, ",") + "]"
+			}(),
+		},
+		{
+			name: "DeeplyNested",
+			json: `{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":"deep"}}}}}}}}}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		val, err := jsonlite.Parse(tt.json)
+		if err != nil {
+			b.Fatalf("%s: parse failed: %v", tt.name, err)
+		}
+
+		// Benchmark Append (uses cached JSON - O(1))
+		b.Run(tt.name+"/Append", func(b *testing.B) {
+			b.SetBytes(int64(len(tt.json)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result := val.Append(nil)
+				if len(result) == 0 {
+					b.Fatal("Append returned empty result")
+				}
+			}
+		})
+
+		// Benchmark Compact (recursive reconstruction - O(n))
+		b.Run(tt.name+"/Compact", func(b *testing.B) {
+			// For compact, measure output size not input size
+			compacted := val.Compact(nil)
+			b.SetBytes(int64(len(compacted)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result := val.Compact(nil)
+				if len(result) == 0 {
+					b.Fatal("Compact returned empty result")
+				}
+			}
+		})
 	}
 }

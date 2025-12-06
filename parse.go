@@ -154,9 +154,9 @@ func parseValue(s string) (Value, string, error) {
 		}
 		return makeStringValue(str), rest, nil
 	case '[':
-		return parseArray(rest)
+		return parseArray(s, rest)
 	case '{':
-		return parseObject(rest)
+		return parseObject(s, rest)
 	case ']':
 		return Value{}, rest, errEndOfArray
 	case '}':
@@ -171,85 +171,98 @@ func parseValue(s string) (Value, string, error) {
 	}
 }
 
-func parseArray(s string) (Value, string, error) {
+func parseArray(start, json string) (Value, string, error) {
 	elements := make([]Value, 0, 32)
 
 	for i := 0; ; i++ {
 		if i != 0 {
-			token, rest, ok := nextToken(s)
+			token, rest, ok := nextToken(json)
 			if !ok {
-				return Value{}, s, errUnexpectedEndOfArray
+				return Value{}, json, errUnexpectedEndOfArray
 			}
 			if token == "]" {
-				return makeArrayValue(slices.Clone(elements)), rest, nil
+				cached := start[:len(start)-len(rest)]
+				result := make([]Value, len(elements)+1)
+				result[0] = makeStringValue(cached)
+				copy(result[1:], elements)
+				return makeArrayValue(result), rest, nil
 			}
 			if token != "," {
-				return Value{}, s, fmt.Errorf("expected ',' or ']', got %q", token)
+				return Value{}, json, fmt.Errorf("expected ',' or ']', got %q", token)
 			}
-			s = rest
+			json = rest
 		}
 
-		v, rest, err := parseValue(s)
+		v, rest, err := parseValue(json)
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
-				return makeArrayValue(slices.Clone(elements)), rest, nil
+				cached := start[:len(start)-len(rest)]
+				result := make([]Value, len(elements)+1)
+				result[0] = makeStringValue(cached)
+				copy(result[1:], elements)
+				return makeArrayValue(result), rest, nil
 			}
 			if err == errEndOfArray {
-				return Value{}, s, fmt.Errorf("unexpected ']' after ','")
+				return Value{}, json, fmt.Errorf("unexpected ']' after ','")
 			}
-			return Value{}, s, err
+			return Value{}, json, err
 		}
-		s = rest
+		json = rest
 		elements = append(elements, v)
 	}
 }
 
-func parseObject(s string) (Value, string, error) {
+func parseObject(start, json string) (Value, string, error) {
 	fields := make([]field, 0, 16)
 
 	for i := 0; ; i++ {
-		token, rest, ok := nextToken(s)
+		token, rest, ok := nextToken(json)
 		if !ok {
-			return Value{}, s, errUnexpectedEndOfObject
+			return Value{}, json, errUnexpectedEndOfObject
 		}
 		if token == "}" {
-			slices.SortFunc(fields, func(a, b field) int {
+			cached := start[:len(start)-len(rest)]
+			result := make([]field, len(fields)+1)
+			result[0].k = cached
+			copy(result[1:], fields)
+			// Sort only the real fields (keep cached JSON at index 0)
+			slices.SortFunc(result[1:], func(a, b field) int {
 				return strings.Compare(a.k, b.k)
 			})
-			return makeObjectValue(slices.Clone(fields)), rest, nil
+			return makeObjectValue(result), rest, nil
 		}
-		s = rest
+		json = rest
 
 		if i != 0 {
 			if token != "," {
-				return Value{}, s, fmt.Errorf("expected ',' or '}', got %q", token)
+				return Value{}, json, fmt.Errorf("expected ',' or '}', got %q", token)
 			}
-			token, rest, ok = nextToken(s)
+			token, rest, ok = nextToken(json)
 			if !ok {
-				return Value{}, s, errUnexpectedEndOfObject
+				return Value{}, json, errUnexpectedEndOfObject
 			}
-			s = rest
+			json = rest
 		}
 
 		key, err := Unquote(token)
 		if err != nil {
-			return Value{}, s, fmt.Errorf("invalid key: %q: %w", token, err)
+			return Value{}, json, fmt.Errorf("invalid key: %q: %w", token, err)
 		}
 
-		token, rest, ok = nextToken(s)
+		token, rest, ok = nextToken(json)
 		if !ok {
-			return Value{}, s, errUnexpectedEndOfObject
+			return Value{}, json, errUnexpectedEndOfObject
 		}
 		if token != ":" {
-			return Value{}, s, fmt.Errorf("%q → expected ':', got %q", key, token)
+			return Value{}, json, fmt.Errorf("%q → expected ':', got %q", key, token)
 		}
-		s = rest
+		json = rest
 
-		val, rest, err := parseValue(s)
+		val, rest, err := parseValue(json)
 		if err != nil {
-			return Value{}, s, fmt.Errorf("%q → %w", key, err)
+			return Value{}, json, fmt.Errorf("%q → %w", key, err)
 		}
-		s = rest
+		json = rest
 		fields = append(fields, field{k: key, v: val})
 	}
 }

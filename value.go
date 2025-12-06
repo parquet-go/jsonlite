@@ -63,8 +63,11 @@ func (v *Value) Kind() Kind {
 // Panics if called on other types.
 func (v *Value) Len() int {
 	switch v.Kind() {
-	case String, Number, Array, Object:
+	case String, Number:
 		return int(v.n & kindMask)
+	case Array, Object:
+		// First element/field is always cached JSON
+		return int(v.n&kindMask) - 1
 	default:
 		panic("jsonlite: Len called on non-string/array/object value")
 	}
@@ -134,7 +137,7 @@ func (v *Value) Array() iter.Seq[*Value] {
 		panic("jsonlite: Array called on non-array value")
 	}
 	return func(yield func(*Value) bool) {
-		elems := unsafe.Slice((*Value)(v.p), v.len())
+		elems := unsafe.Slice((*Value)(v.p), v.len())[1:]
 		for i := range elems {
 			if !yield(&elems[i]) {
 				return
@@ -150,7 +153,7 @@ func (v *Value) Object() iter.Seq2[string, *Value] {
 		panic("jsonlite: Object called on non-object value")
 	}
 	return func(yield func(string, *Value) bool) {
-		fields := unsafe.Slice((*field)(v.p), v.len())
+		fields := unsafe.Slice((*field)(v.p), v.len())[1:]
 		for i := range fields {
 			if !yield(fields[i].k, &fields[i].v) {
 				return
@@ -166,12 +169,20 @@ func (v *Value) Lookup(k string) *Value {
 	if v.Kind() != Object {
 		panic("jsonlite: Lookup called on non-object value")
 	}
-	fields := unsafe.Slice((*field)(v.p), v.len())
-	i, ok := slices.BinarySearchFunc(fields, k, func(a field, b string) int {
-		return strings.Compare(a.k, b)
-	})
-	if ok {
-		return &fields[i].v
+	fields := unsafe.Slice((*field)(v.p), v.len())[1:]
+	if len(fields) <= 16 {
+		for i := range fields {
+			if fields[i].k == k {
+				return &fields[i].v
+			}
+		}
+	} else {
+		i, ok := slices.BinarySearchFunc(fields, k, func(a field, b string) int {
+			return strings.Compare(a.k, b)
+		})
+		if ok {
+			return &fields[i].v
+		}
 	}
 	return nil
 }
@@ -290,7 +301,7 @@ func AsBool(v *Value) bool {
 			f, err := strconv.ParseFloat(v.raw(), 64)
 			return err == nil && f != 0
 		case String, Object, Array:
-			return v.len() > 0
+			return v.Len() > 0
 		}
 	}
 	return false
@@ -428,19 +439,38 @@ func (v *Value) Append(buf []byte) []byte {
 	switch v.Kind() {
 	case Null:
 		return append(buf, "null"...)
-
 	case True:
 		return append(buf, "true"...)
-
 	case False:
 		return append(buf, "false"...)
-
 	case Number:
 		return append(buf, v.raw()...)
-
 	case String:
-		return AppendQuote(buf, v.String())
+		return AppendQuote(buf, v.raw())
+	case Array:
+		return append(buf, (*Value)(v.p).raw()...)
+	case Object:
+		return append(buf, (*field)(v.p).k...)
+	default:
+		return buf
+	}
+}
 
+// Compact appends a compacted JSON representation of the value to buf by recursively
+// reconstructing it from the parsed structure. Unlike Append, this method does not
+// use cached JSON and always regenerates the output.
+func (v *Value) Compact(buf []byte) []byte {
+	switch v.Kind() {
+	case Null:
+		return append(buf, "null"...)
+	case True:
+		return append(buf, "true"...)
+	case False:
+		return append(buf, "false"...)
+	case Number:
+		return append(buf, v.raw()...)
+	case String:
+		return AppendQuote(buf, v.raw())
 	case Array:
 		buf = append(buf, '[')
 		var count int
@@ -448,11 +478,10 @@ func (v *Value) Append(buf []byte) []byte {
 			if count > 0 {
 				buf = append(buf, ',')
 			}
-			buf = elem.Append(buf)
+			buf = elem.Compact(buf)
 			count++
 		}
 		return append(buf, ']')
-
 	case Object:
 		buf = append(buf, '{')
 		var count int
@@ -462,11 +491,10 @@ func (v *Value) Append(buf []byte) []byte {
 			}
 			buf = AppendQuote(buf, k)
 			buf = append(buf, ':')
-			buf = v.Append(buf)
+			buf = v.Compact(buf)
 			count++
 		}
 		return append(buf, '}')
-
 	default:
 		return buf
 	}
