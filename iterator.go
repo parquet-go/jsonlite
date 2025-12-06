@@ -252,14 +252,8 @@ func (it *Iterator) value() (Value, error) {
 	}
 
 	switch it.kind {
-	case Null:
-		return makeNullValue(), nil
-	case True:
-		return makeTrueValue(), nil
-	case False:
-		return makeFalseValue(), nil
-	case Number:
-		return makeNumberValue(it.token), nil
+	case Null, True, False, Number:
+		return makeValue(it.kind, it.token), nil
 	case String:
 		s, err := Unquote(it.token)
 		if err != nil {
@@ -292,9 +286,7 @@ func (it *Iterator) value() (Value, error) {
 }
 
 // Null returns true if the current value is null.
-func (it *Iterator) Null() bool {
-	return it.kind == Null
-}
+func (it *Iterator) Null() bool { return it.kind == Null }
 
 // Bool returns the current value as a boolean.
 // Returns false for null values.

@@ -136,17 +136,17 @@ func parseValue(s string) (Value, string, error) {
 		if token != "null" {
 			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeNullValue(), rest, nil
+		return makeNullValue(token[:4]), rest, nil
 	case 't':
 		if token != "true" {
 			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeTrueValue(), rest, nil
+		return makeTrueValue(token[:4]), rest, nil
 	case 'f':
 		if token != "false" {
 			return Value{}, rest, fmt.Errorf("invalid token: %q", token)
 		}
-		return makeFalseValue(), rest, nil
+		return makeFalseValue(token[:5]), rest, nil
 	case '"':
 		str, err := Unquote(token)
 		if err != nil {

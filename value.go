@@ -79,7 +79,7 @@ func (v *Value) Int() int64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Int called on non-number value")
 	}
-	i, err := strconv.ParseInt(v.raw(), 10, 64)
+	i, err := strconv.ParseInt(v.string(), 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -92,7 +92,7 @@ func (v *Value) Uint() uint64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Uint called on non-number value")
 	}
-	u, err := strconv.ParseUint(v.raw(), 10, 64)
+	u, err := strconv.ParseUint(v.string(), 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -105,7 +105,7 @@ func (v *Value) Float() float64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Float called on non-number value")
 	}
-	f, err := strconv.ParseFloat(v.raw(), 64)
+	f, err := strconv.ParseFloat(v.string(), 64)
 	if err != nil {
 		panic(err)
 	}
@@ -117,16 +117,12 @@ func (v *Value) Float() float64 {
 // For other types, returns the JSON representation.
 func (v *Value) String() string {
 	switch v.Kind() {
-	case String, Number:
-		return v.raw()
-	case Null:
-		return "null"
-	case True:
-		return "true"
-	case False:
-		return "false"
+	case String, Number, Null, True, False:
+		return v.string()
+	case Array:
+		return (*Value)(v.p).string()
 	default:
-		return string(v.Append(nil))
+		return (*field)(v.p).k
 	}
 }
 
@@ -193,7 +189,7 @@ func (v *Value) NumberType() NumberType {
 	if v.Kind() != Number {
 		panic("jsonlite: NumberType called on non-number value")
 	}
-	return NumberTypeOf(v.raw())
+	return NumberTypeOf(v.string())
 }
 
 // Number returns the value as a json.Number.
@@ -202,16 +198,13 @@ func (v *Value) Number() json.Number {
 	if v.Kind() != Number {
 		panic("jsonlite: Number called on non-number value")
 	}
-	return json.Number(v.raw())
+	return json.Number(v.string())
 }
 
-// raw returns the underlying string data without type checking.
-// This is used internally by methods that have already verified the type.
-func (v *Value) raw() string {
+func (v *Value) string() string {
 	return unsafe.String((*byte)(v.p), v.len())
 }
 
-// len returns the length stored in the value without type checking.
 func (v *Value) len() int {
 	return int(v.n & kindMask)
 }
@@ -249,30 +242,32 @@ func NumberTypeOf(s string) NumberType {
 	return t
 }
 
-func makeNullValue() Value {
-	return Value{n: uintptr(Null) << kindShift}
+func makeValue(k Kind, s string) Value {
+	return Value{
+		p: unsafe.Pointer(unsafe.StringData(s)),
+		n: (uintptr(k) << kindShift) | uintptr(len(s)),
+	}
+
 }
 
-func makeTrueValue() Value {
-	return Value{n: uintptr(True)<<kindShift | 1}
+func makeNullValue(s string) Value {
+	return makeValue(Null, s)
 }
 
-func makeFalseValue() Value {
-	return Value{n: uintptr(False)<<kindShift | 0}
+func makeTrueValue(s string) Value {
+	return makeValue(True, s)
+}
+
+func makeFalseValue(s string) Value {
+	return makeValue(False, s)
 }
 
 func makeNumberValue(s string) Value {
-	return Value{
-		p: unsafe.Pointer(unsafe.StringData(s)),
-		n: (uintptr(Number) << kindShift) | uintptr(len(s)),
-	}
+	return makeValue(Number, s)
 }
 
 func makeStringValue(s string) Value {
-	return Value{
-		p: unsafe.Pointer(unsafe.StringData(s)),
-		n: (uintptr(String) << kindShift) | uintptr(len(s)),
-	}
+	return makeValue(String, s)
 }
 
 func makeArrayValue(elements []Value) Value {
@@ -298,7 +293,7 @@ func AsBool(v *Value) bool {
 		case True:
 			return true
 		case Number:
-			f, err := strconv.ParseFloat(v.raw(), 64)
+			f, err := strconv.ParseFloat(v.string(), 64)
 			return err == nil && f != 0
 		case String, Object, Array:
 			return v.Len() > 0
@@ -315,12 +310,8 @@ func AsBool(v *Value) bool {
 func AsString(v *Value) string {
 	if v != nil {
 		switch v.Kind() {
-		case True:
-			return "true"
-		case False:
-			return "false"
-		case Number, String:
-			return v.raw()
+		case True, False, Number, String:
+			return v.string()
 		case Object, Array:
 			return string(v.Append(nil))
 		}
@@ -338,10 +329,10 @@ func AsInt(v *Value) int64 {
 		case True:
 			return 1
 		case Number, String:
-			if i, err := strconv.ParseInt(v.raw(), 10, 64); err == nil {
+			if i, err := strconv.ParseInt(v.string(), 10, 64); err == nil {
 				return i
 			}
-			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
 				return int64(f)
 			}
 		}
@@ -359,10 +350,10 @@ func AsUint(v *Value) uint64 {
 		case True:
 			return 1
 		case Number, String:
-			if u, err := strconv.ParseUint(v.raw(), 10, 64); err == nil {
+			if u, err := strconv.ParseUint(v.string(), 10, 64); err == nil {
 				return u
 			}
-			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
 				if f >= 0 {
 					return uint64(f)
 				}
@@ -382,7 +373,7 @@ func AsFloat(v *Value) float64 {
 		case True:
 			return 1
 		case Number, String:
-			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
 				return f
 			}
 		}
@@ -400,11 +391,11 @@ func AsDuration(v *Value) time.Duration {
 		case True:
 			return time.Second
 		case Number:
-			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
 				return time.Duration(f * float64(time.Second))
 			}
 		case String:
-			if d, err := time.ParseDuration(v.raw()); err == nil {
+			if d, err := time.ParseDuration(v.string()); err == nil {
 				return d
 			}
 		}
@@ -420,12 +411,12 @@ func AsTime(v *Value) time.Time {
 	if v != nil {
 		switch v.Kind() {
 		case Number:
-			if f, err := strconv.ParseFloat(v.raw(), 64); err == nil {
+			if f, err := strconv.ParseFloat(v.string(), 64); err == nil {
 				sec, frac := math.Modf(f)
 				return time.Unix(int64(sec), int64(frac*1e9)).UTC()
 			}
 		case String:
-			if t, err := time.ParseInLocation(time.RFC3339, v.raw(), time.UTC); err == nil {
+			if t, err := time.ParseInLocation(time.RFC3339, v.string(), time.UTC); err == nil {
 				return t
 			}
 		}
@@ -437,18 +428,12 @@ func AsTime(v *Value) time.Time {
 // Returns the extended buffer.
 func (v *Value) Append(buf []byte) []byte {
 	switch v.Kind() {
-	case Null:
-		return append(buf, "null"...)
-	case True:
-		return append(buf, "true"...)
-	case False:
-		return append(buf, "false"...)
-	case Number:
-		return append(buf, v.raw()...)
 	case String:
-		return AppendQuote(buf, v.raw())
+		return AppendQuote(buf, v.string())
+	case Number, Null, True, False:
+		return append(buf, v.string()...)
 	case Array:
-		return append(buf, (*Value)(v.p).raw()...)
+		return append(buf, (*Value)(v.p).string()...)
 	case Object:
 		return append(buf, (*field)(v.p).k...)
 	default:
@@ -461,16 +446,10 @@ func (v *Value) Append(buf []byte) []byte {
 // use cached JSON and always regenerates the output.
 func (v *Value) Compact(buf []byte) []byte {
 	switch v.Kind() {
-	case Null:
-		return append(buf, "null"...)
-	case True:
-		return append(buf, "true"...)
-	case False:
-		return append(buf, "false"...)
-	case Number:
-		return append(buf, v.raw()...)
+	case Null, True, False, Number:
+		return append(buf, v.string()...)
 	case String:
-		return AppendQuote(buf, v.raw())
+		return AppendQuote(buf, v.string())
 	case Array:
 		buf = append(buf, '[')
 		var count int
