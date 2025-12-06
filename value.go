@@ -482,16 +482,7 @@ func AsTime(v *Value) time.Time {
 
 // Append serializes the Value to JSON and appends it to the buffer.
 // Returns the extended buffer.
-func (v *Value) Append(buf []byte) []byte {
-	switch v.Kind() {
-	case String, Number, Null, True, False:
-		return append(buf, v.json()...)
-	case Array:
-		return append(buf, (*Value)(v.p).json()...)
-	default:
-		return append(buf, (*field)(v.p).k...)
-	}
-}
+func (v *Value) Append(buf []byte) []byte { return append(buf, v.JSON()...) }
 
 // Compact appends a compacted JSON representation of the value to buf by recursively
 // reconstructing it from the parsed structure. Unlike Append, this method does not
