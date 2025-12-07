@@ -8,6 +8,11 @@ import (
 	"unsafe"
 )
 
+const (
+	// DefaultMaxDepth is the default maximum depth for parsing JSON objects.
+	DefaultMaxDepth = 100
+)
+
 var (
 	errEndOfObject           = errors.New("}")
 	errEndOfArray            = errors.New("]")
@@ -109,8 +114,6 @@ func nextToken(s string) (token, rest string, ok bool) {
 		return s[:j], s[j:], true
 	}
 }
-
-const DefaultMaxDepth = 1000
 
 // ParseMaxDepth parses JSON data with a maximum nesting depth for objects.
 // Objects at maxDepth <= 0 are stored unparsed and will be lazily parsed
@@ -223,7 +226,7 @@ func parseArray(start, json string, maxDepth int) (Value, string, error) {
 }
 
 func parseObject(start, json string, maxDepth int) (Value, string, error) {
-	if maxDepth <= 0 {
+	if maxDepth == 0 {
 		depth, remain := 1, json
 		for depth > 0 {
 			token, next, ok := nextToken(remain)
@@ -242,6 +245,7 @@ func parseObject(start, json string, maxDepth int) (Value, string, error) {
 		return makeUnparsedObjectValue(json), remain, nil
 	}
 
+	maxDepth--
 	fields := make([]field, 0, 16)
 
 	for i := 0; ; i++ {
@@ -291,7 +295,7 @@ func parseObject(start, json string, maxDepth int) (Value, string, error) {
 		}
 		json = rest
 
-		val, rest, err := parseValue(json, maxDepth-1)
+		val, rest, err := parseValue(json, maxDepth)
 		if err != nil {
 			return Value{}, json, fmt.Errorf("%q → %w", key, err)
 		}
