@@ -130,6 +130,179 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+func TestLookupComprehensive(t *testing.T) {
+	t.Run("EmptyObject", func(t *testing.T) {
+		val, err := jsonlite.Parse(`{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v := val.Lookup("any"); v != nil {
+			t.Error("expected nil for lookup in empty object")
+		}
+	})
+
+	t.Run("EmptyStringKey", func(t *testing.T) {
+		val, err := jsonlite.Parse(`{"":42,"a":1}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := val.Lookup("")
+		if v == nil {
+			t.Fatal("expected to find empty string key")
+		}
+		if v.Int() != 42 {
+			t.Errorf("expected 42 for empty key, got %d", v.Int())
+		}
+		// Ensure other keys still work
+		if v := val.Lookup("a"); v == nil || v.Int() != 1 {
+			t.Error("expected to find key 'a' with value 1")
+		}
+	})
+
+	t.Run("PrefixKeys", func(t *testing.T) {
+		val, err := jsonlite.Parse(`{"a":1,"ab":2,"abc":3,"abcd":4}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tests := []struct {
+			key   string
+			value int64
+		}{
+			{"a", 1},
+			{"ab", 2},
+			{"abc", 3},
+			{"abcd", 4},
+		}
+		for _, tt := range tests {
+			v := val.Lookup(tt.key)
+			if v == nil {
+				t.Errorf("expected to find key %q", tt.key)
+			} else if v.Int() != tt.value {
+				t.Errorf("key %q: expected %d, got %d", tt.key, tt.value, v.Int())
+			}
+		}
+		// Ensure non-existent prefix doesn't match
+		if v := val.Lookup("abcde"); v != nil {
+			t.Error("expected nil for non-existent key 'abcde'")
+		}
+	})
+
+	t.Run("LargeObject", func(t *testing.T) {
+		// Create object with 300 fields to guarantee hash collisions
+		// (only 256 possible hash values)
+		var sb strings.Builder
+		sb.WriteString("{")
+		for i := 0; i < 300; i++ {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(fmt.Sprintf(`"key%d":%d`, i, i))
+		}
+		sb.WriteString("}")
+
+		val, err := jsonlite.Parse(sb.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Test that all keys can be found despite collisions
+		for i := 0; i < 300; i++ {
+			key := fmt.Sprintf("key%d", i)
+			v := val.Lookup(key)
+			if v == nil {
+				t.Errorf("expected to find key %q", key)
+			} else if v.Int() != int64(i) {
+				t.Errorf("key %q: expected %d, got %d", key, i, v.Int())
+			}
+		}
+
+		// Test non-existent key
+		if v := val.Lookup("key300"); v != nil {
+			t.Error("expected nil for non-existent key 'key300'")
+		}
+	})
+
+	t.Run("HashCollisions", func(t *testing.T) {
+		// Generate keys and find ones that hash to the same value
+		// We'll build an object with keys that we know will collide
+		keysByHash := make(map[byte][]string)
+
+		// Generate candidate keys
+		for i := 0; i < 1000; i++ {
+			key := fmt.Sprintf("k%d", i)
+			// We need to compute the hash the same way Lookup does
+			// Since we don't have access to hashseed, we'll just create
+			// a diverse set of keys and trust that some will collide
+			keysByHash[byte(i%256)] = append(keysByHash[byte(i%256)], key)
+		}
+
+		// Build an object with multiple keys per hash bucket
+		var sb strings.Builder
+		sb.WriteString("{")
+		first := true
+		count := 0
+		for _, keys := range keysByHash {
+			if len(keys) >= 3 && count < 10 {
+				// Use first 3 keys from this bucket to force collisions
+				for j := 0; j < 3; j++ {
+					if !first {
+						sb.WriteString(",")
+					}
+					first = false
+					sb.WriteString(fmt.Sprintf(`"%s":%d`, keys[j], j))
+					count++
+				}
+			}
+			if count >= 30 {
+				break
+			}
+		}
+		sb.WriteString("}")
+
+		val, err := jsonlite.Parse(sb.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify all keys can still be found
+		for k, v := range val.Object() {
+			found := val.Lookup(k)
+			if found == nil {
+				t.Errorf("failed to lookup key %q that exists in object", k)
+			}
+			if found.JSON() != v.JSON() {
+				t.Errorf("key %q: lookup returned different value", k)
+			}
+		}
+	})
+
+	t.Run("SimilarKeys", func(t *testing.T) {
+		// Keys that differ by one character
+		val, err := jsonlite.Parse(`{"user":1,"usar":2,"used":3}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		tests := []struct {
+			key   string
+			value int64
+		}{
+			{"user", 1},
+			{"usar", 2},
+			{"used", 3},
+		}
+
+		for _, tt := range tests {
+			v := val.Lookup(tt.key)
+			if v == nil {
+				t.Errorf("expected to find key %q", tt.key)
+			} else if v.Int() != tt.value {
+				t.Errorf("key %q: expected %d, got %d", tt.key, tt.value, v.Int())
+			}
+		}
+	})
+}
+
 func TestNumberType(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -63,9 +63,7 @@ type field struct {
 }
 
 // Kind returns the type of the JSON value.
-func (v *Value) Kind() Kind {
-	return Kind(v.n >> kindShift)
-}
+func (v *Value) Kind() Kind { return Kind(v.n >> kindShift) }
 
 // Len returns the length of the value.
 // For strings, it returns the number of bytes.
@@ -278,28 +276,17 @@ func makeValue(k Kind, s string) Value {
 		p: unsafe.Pointer(unsafe.StringData(s)),
 		n: (uintptr(k) << kindShift) | uintptr(len(s)),
 	}
-
 }
 
-func makeNullValue(s string) Value {
-	return makeValue(Null, s)
-}
+func makeNullValue(s string) Value { return makeValue(Null, s) }
 
-func makeTrueValue(s string) Value {
-	return makeValue(True, s)
-}
+func makeTrueValue(s string) Value { return makeValue(True, s) }
 
-func makeFalseValue(s string) Value {
-	return makeValue(False, s)
-}
+func makeFalseValue(s string) Value { return makeValue(False, s) }
 
-func makeNumberValue(s string) Value {
-	return makeValue(Number, s)
-}
+func makeNumberValue(s string) Value { return makeValue(Number, s) }
 
-func makeStringValue(s string) Value {
-	return makeValue(String, s)
-}
+func makeStringValue(s string) Value { return makeValue(String, s) }
 
 func makeArrayValue(elements []Value) Value {
 	return Value{
