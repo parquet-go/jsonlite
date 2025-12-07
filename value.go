@@ -2,9 +2,9 @@ package jsonlite
 
 import (
 	"encoding/json"
+	"hash/maphash"
 	"iter"
 	"math"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +18,11 @@ const (
 	// on 32-bit systems this is 29 (top 3 bits for kind, bottom 29 for length).
 	kindShift = (unsafe.Sizeof(uintptr(0))*8 - 3)
 	kindMask  = (1 << kindShift) - 1
+)
+
+var (
+	// hashseed is the seed used for hashing object keys.
+	hashseed = maphash.MakeSeed()
 )
 
 // Kind represents the type of a JSON value.
@@ -136,7 +141,7 @@ func (v *Value) String() string {
 	case Array:
 		return (*Value)(v.p).json()
 	default:
-		return (*field)(v.p).k
+		return (*field)(v.p).v.json()
 	}
 }
 
@@ -148,7 +153,7 @@ func (v *Value) JSON() string {
 	case Array:
 		return (*Value)(v.p).json()
 	default:
-		return (*field)(v.p).k
+		return (*field)(v.p).v.json()
 	}
 }
 
@@ -191,22 +196,22 @@ func (v *Value) Lookup(k string) *Value {
 	if v.Kind() != Object {
 		panic("jsonlite: Lookup called on non-object value")
 	}
-	fields := unsafe.Slice((*field)(v.p), v.len())[1:]
-	if len(fields) <= 16 {
-		for i := range fields {
-			if fields[i].k == k {
-				return &fields[i].v
-			}
+	fields := unsafe.Slice((*field)(v.p), v.len())
+	hashes := fields[0].k
+	refkey := byte(maphash.String(hashseed, k))
+	offset := 0
+	for {
+		i := strings.IndexByte(hashes[offset:], refkey)
+		if i < 0 {
+			return nil
 		}
-	} else {
-		i, ok := slices.BinarySearchFunc(fields, k, func(a field, b string) int {
-			return strings.Compare(a.k, b)
-		})
-		if ok {
-			return &fields[i].v
+		j := offset + i + 1
+		f := &fields[j]
+		if f.k == k {
+			return &f.v
 		}
+		offset = j
 	}
-	return nil
 }
 
 // NumberType returns the classification of the number (int, uint, or float).

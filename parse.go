@@ -3,8 +3,9 @@ package jsonlite
 import (
 	"errors"
 	"fmt"
-	"slices"
+	"hash/maphash"
 	"strings"
+	"unsafe"
 )
 
 var (
@@ -223,12 +224,16 @@ func parseObject(start, json string) (Value, string, error) {
 		if token == "}" {
 			cached := start[:len(start)-len(rest)]
 			result := make([]field, len(fields)+1)
-			result[0].k = cached
 			copy(result[1:], fields)
-			// Sort only the real fields (keep cached JSON at index 0)
-			slices.SortFunc(result[1:], func(a, b field) int {
-				return strings.Compare(a.k, b.k)
-			})
+
+			fields := result[1:]
+			hashes := make([]byte, len(fields), (len(fields)*8+1)/8)
+			for i := range fields {
+				hashes[i] = byte(maphash.String(hashseed, fields[i].k))
+			}
+
+			result[0].v = makeStringValue(cached)
+			result[0].k = unsafe.String(unsafe.SliceData(hashes), cap(hashes))
 			return makeObjectValue(result), rest, nil
 		}
 		json = rest
