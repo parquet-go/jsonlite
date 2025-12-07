@@ -601,105 +601,105 @@ func TestValueSafetyChecks(t *testing.T) {
 		operation func(*jsonlite.Value)
 	}{
 		{
-			name:  "IntOnString",
+			name:  "calling int on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Int()
 			},
 		},
 		{
-			name:  "IntOnArray",
+			name:  "calling int on array value panics",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Int()
 			},
 		},
 		{
-			name:  "FloatOnString",
+			name:  "calling float on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Float()
 			},
 		},
 		{
-			name:  "UintOnObject",
+			name:  "calling uint on object value panics",
 			input: `{"a":1}`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Uint()
 			},
 		},
 		{
-			name:  "ArrayOnString",
+			name:  "calling array on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Array()
 			},
 		},
 		{
-			name:  "ArrayOnNumber",
+			name:  "calling array on number value panics",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Array()
 			},
 		},
 		{
-			name:  "ObjectOnString",
+			name:  "calling object on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Object()
 			},
 		},
 		{
-			name:  "ObjectOnArray",
+			name:  "calling object on array value panics",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Object()
 			},
 		},
 		{
-			name:  "LookupOnArray",
+			name:  "calling lookup on array value panics",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Lookup("key")
 			},
 		},
 		{
-			name:  "LookupOnString",
+			name:  "calling lookup on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Lookup("key")
 			},
 		},
 		{
-			name:  "NumberOnString",
+			name:  "calling number on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Number()
 			},
 		},
 		{
-			name:  "NumberOnArray",
+			name:  "calling number on array value panics",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Number()
 			},
 		},
 		{
-			name:  "LenOnNull",
+			name:  "calling len on null value panics",
 			input: "null",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
 			},
 		},
 		{
-			name:  "LenOnTrue",
+			name:  "calling len on true value panics",
 			input: "true",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
 			},
 		},
 		{
-			name:  "LenOnFalse",
+			name:  "calling len on false value panics",
 			input: "false",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
@@ -733,126 +733,126 @@ func TestValueValidOperations(t *testing.T) {
 		operation func(*jsonlite.Value)
 	}{
 		{
-			name:  "StringOnString",
+			name:  "calling string on string value succeeds",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.String()
 			},
 		},
 		{
-			name:  "StringOnNumber",
+			name:  "calling string on number value succeeds",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
 				_ = v.String()
 			},
 		},
 		{
-			name:  "IntOnNumber",
+			name:  "calling int on number value succeeds",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Int()
 			},
 		},
 		{
-			name:  "UintOnNumber",
+			name:  "calling uint on number value succeeds",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Uint()
 			},
 		},
 		{
-			name:  "FloatOnNumber",
+			name:  "calling float on number value succeeds",
 			input: "3.14",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Float()
 			},
 		},
 		{
-			name:  "ArrayOnArray",
+			name:  "calling array on array value succeeds",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Array()
 			},
 		},
 		{
-			name:  "ObjectOnObject",
+			name:  "calling object on object value succeeds",
 			input: `{"a":1}`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Object()
 			},
 		},
 		{
-			name:  "LookupOnObject",
+			name:  "calling lookup on object value succeeds",
 			input: `{"a":1}`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Lookup("a")
 			},
 		},
 		{
-			name:  "NumberOnNumber",
+			name:  "calling number on number value succeeds",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Number()
 			},
 		},
 		{
-			name:  "LenOnString",
+			name:  "calling len on string value succeeds",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
 			},
 		},
 		{
-			name:  "LenOnNumber",
+			name:  "calling len on number value succeeds",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
 			},
 		},
 		{
-			name:  "LenOnArray",
+			name:  "calling len on array value succeeds",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
 			},
 		},
 		{
-			name:  "LenOnObject",
+			name:  "calling len on object value succeeds",
 			input: `{"a":1}`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
 			},
 		},
 		{
-			name:  "StringOnArray",
+			name:  "calling string on array value returns json",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
 				_ = v.String() // Should return JSON, not panic
 			},
 		},
 		{
-			name:  "StringOnObject",
+			name:  "calling string on object value returns json",
 			input: `{"a":1}`,
 			operation: func(v *jsonlite.Value) {
 				_ = v.String() // Should return JSON, not panic
 			},
 		},
 		{
-			name:  "StringOnNull",
+			name:  "calling string on null value returns string",
 			input: "null",
 			operation: func(v *jsonlite.Value) {
 				_ = v.String() // Should return "null", not panic
 			},
 		},
 		{
-			name:  "StringOnTrue",
+			name:  "calling string on true value returns string",
 			input: "true",
 			operation: func(v *jsonlite.Value) {
 				_ = v.String() // Should return "true", not panic
 			},
 		},
 		{
-			name:  "StringOnFalse",
+			name:  "calling string on false value returns string",
 			input: "false",
 			operation: func(v *jsonlite.Value) {
 				_ = v.String() // Should return "false", not panic

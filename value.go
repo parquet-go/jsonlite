@@ -2,6 +2,7 @@ package jsonlite
 
 import (
 	"encoding/json"
+	"fmt"
 	"hash/maphash"
 	"iter"
 	"math"
@@ -18,6 +19,9 @@ const (
 	// on 32-bit systems this is 29 (top 3 bits for kind, bottom 29 for length).
 	kindShift = (unsafe.Sizeof(uintptr(0))*8 - 3)
 	kindMask  = (1 << kindShift) - 1
+	// unparsedBit is set for objects/arrays that haven't been parsed yet (lazy parsing).
+	// On 64-bit systems this is bit 60, on 32-bit systems this is bit 28.
+	unparsedBit = uintptr(1) << (kindShift - 1)
 )
 
 var (
@@ -78,8 +82,12 @@ func (v *Value) Len() int {
 	case Number:
 		return int(v.n & kindMask)
 	case Array, Object:
+		parsed := v
+		if v.unparsed() {
+			parsed = v.parse()
+		}
 		// First element/field is always cached JSON
-		return int(v.n&kindMask) - 1
+		return int(parsed.n&kindMask) - 1
 	default:
 		panic("jsonlite: Len called on non-string/array/object value")
 	}
@@ -139,6 +147,9 @@ func (v *Value) String() string {
 	case Array:
 		return (*Value)(v.p).json()
 	default:
+		if v.unparsed() {
+			return v.json()
+		}
 		return (*field)(v.p).v.json()
 	}
 }
@@ -151,6 +162,9 @@ func (v *Value) JSON() string {
 	case Array:
 		return (*Value)(v.p).json()
 	default:
+		if v.unparsed() {
+			return v.json()
+		}
 		return (*field)(v.p).v.json()
 	}
 }
@@ -162,7 +176,11 @@ func (v *Value) Array() iter.Seq[*Value] {
 		panic("jsonlite: Array called on non-array value")
 	}
 	return func(yield func(*Value) bool) {
-		elems := unsafe.Slice((*Value)(v.p), v.len())[1:]
+		parsed := v
+		if v.unparsed() {
+			parsed = v.parse()
+		}
+		elems := unsafe.Slice((*Value)(parsed.p), parsed.len())[1:]
 		for i := range elems {
 			if !yield(&elems[i]) {
 				return
@@ -178,7 +196,11 @@ func (v *Value) Object() iter.Seq2[string, *Value] {
 		panic("jsonlite: Object called on non-object value")
 	}
 	return func(yield func(string, *Value) bool) {
-		fields := unsafe.Slice((*field)(v.p), v.len())[1:]
+		parsed := v
+		if v.unparsed() {
+			parsed = v.parse()
+		}
+		fields := unsafe.Slice((*field)(parsed.p), parsed.len())[1:]
 		for i := range fields {
 			if !yield(fields[i].k, &fields[i].v) {
 				return
@@ -194,7 +216,11 @@ func (v *Value) Lookup(k string) *Value {
 	if v.Kind() != Object {
 		panic("jsonlite: Lookup called on non-object value")
 	}
-	fields := unsafe.Slice((*field)(v.p), v.len())
+	parsed := v
+	if v.unparsed() {
+		parsed = v.parse()
+	}
+	fields := unsafe.Slice((*field)(parsed.p), parsed.len())
 	hashes := fields[0].k
 	refkey := byte(maphash.String(hashseed, k))
 	offset := 0
@@ -235,7 +261,19 @@ func (v *Value) json() string {
 }
 
 func (v *Value) len() int {
-	return int(v.n & kindMask)
+	return int(v.n & (kindMask &^ unparsedBit))
+}
+
+func (v *Value) unparsed() bool {
+	return (v.n & unparsedBit) != 0
+}
+
+func (v *Value) parse() *Value {
+	parsed, err := Parse(v.JSON())
+	if err != nil {
+		panic(fmt.Errorf("jsonlite: lazy parse failed: %w", err))
+	}
+	return parsed
 }
 
 // NumberType represents the classification of a JSON number.
@@ -299,6 +337,13 @@ func makeObjectValue(fields []field) Value {
 	return Value{
 		p: unsafe.Pointer(unsafe.SliceData(fields)),
 		n: (uintptr(Object) << kindShift) | uintptr(len(fields)),
+	}
+}
+
+func makeUnparsedObjectValue(json string) Value {
+	return Value{
+		p: unsafe.Pointer(unsafe.StringData(json)),
+		n: (uintptr(Object) << kindShift) | uintptr(len(json)) | unparsedBit,
 	}
 }
 
@@ -484,9 +529,13 @@ func (v *Value) Compact(buf []byte) []byte {
 	case String, Null, True, False, Number:
 		return append(buf, v.json()...)
 	case Array:
+		parsed := v
+		if v.unparsed() {
+			parsed = v.parse()
+		}
 		buf = append(buf, '[')
 		var count int
-		for elem := range v.Array() {
+		for elem := range parsed.Array() {
 			if count > 0 {
 				buf = append(buf, ',')
 			}
@@ -495,9 +544,13 @@ func (v *Value) Compact(buf []byte) []byte {
 		}
 		return append(buf, ']')
 	default:
+		parsed := v
+		if v.unparsed() {
+			parsed = v.parse()
+		}
 		buf = append(buf, '{')
 		var count int
-		for k, v := range v.Object() {
+		for k, v := range parsed.Object() {
 			if count > 0 {
 				buf = append(buf, ',')
 			}

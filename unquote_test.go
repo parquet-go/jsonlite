@@ -13,147 +13,147 @@ func TestUnquoteValid(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "EmptyString",
+			name:     "empty string is unquoted correctly",
 			input:    `""`,
 			expected: "",
 		},
 		{
-			name:     "SimpleString",
+			name:     "simple string is unquoted correctly",
 			input:    `"hello"`,
 			expected: "hello",
 		},
 		{
-			name:     "StringWithSpaces",
+			name:     "string with spaces is unquoted correctly",
 			input:    `"hello world"`,
 			expected: "hello world",
 		},
 		{
-			name:     "EscapedQuote",
+			name:     "escaped quote is unquoted correctly",
 			input:    `"say \"hello\""`,
 			expected: `say "hello"`,
 		},
 		{
-			name:     "EscapedBackslash",
+			name:     "escaped backslash is unquoted correctly",
 			input:    `"path\\to\\file"`,
 			expected: `path\to\file`,
 		},
 		{
-			name:     "EscapedSlash",
+			name:     "escaped slash is unquoted correctly",
 			input:    `"a\/b"`,
 			expected: "a/b",
 		},
 		{
-			name:     "EscapedBackspace",
+			name:     "escaped backspace is unquoted correctly",
 			input:    `"a\bb"`,
 			expected: "a\bb",
 		},
 		{
-			name:     "EscapedFormfeed",
+			name:     "escaped formfeed is unquoted correctly",
 			input:    `"a\fb"`,
 			expected: "a\fb",
 		},
 		{
-			name:     "EscapedNewline",
+			name:     "escaped newline is unquoted correctly",
 			input:    `"line1\nline2"`,
 			expected: "line1\nline2",
 		},
 		{
-			name:     "EscapedCarriageReturn",
+			name:     "escaped carriage return is unquoted correctly",
 			input:    `"line1\rline2"`,
 			expected: "line1\rline2",
 		},
 		{
-			name:     "EscapedTab",
+			name:     "escaped tab is unquoted correctly",
 			input:    `"col1\tcol2"`,
 			expected: "col1\tcol2",
 		},
 		{
-			name:     "UnicodeNull",
+			name:     "unicode null character is unquoted correctly",
 			input:    `"\u0000"`,
 			expected: "\u0000",
 		},
 		{
-			name:     "UnicodeASCII",
+			name:     "unicode ascii character is unquoted correctly",
 			input:    `"\u0041"`,
 			expected: "A",
 		},
 		{
-			name:     "UnicodeMultiByte",
+			name:     "unicode multibyte characters are unquoted correctly",
 			input:    `"\u4e2d\u6587"`,
 			expected: "中文",
 		},
 		{
-			name:     "UnicodeMax",
+			name:     "unicode max value is unquoted correctly",
 			input:    `"\uffff"`,
 			expected: "\uffff",
 		},
 		{
-			name:     "MixedEscapes",
+			name:     "mixed escapes are unquoted correctly",
 			input:    `"line1\nline2\ttab\u0041end"`,
 			expected: "line1\nline2\ttabAend",
 		},
 		{
-			name:     "MultipleQuotes",
+			name:     "multiple quotes are unquoted correctly",
 			input:    `"\"quote1\" and \"quote2\""`,
 			expected: `"quote1" and "quote2"`,
 		},
 		{
-			name:     "AllSingleCharEscapes",
+			name:     "all single character escapes are unquoted correctly",
 			input:    `"\"\\\//\b\f\n\r\t"`,
 			expected: "\"\\//\b\f\n\r\t",
 		},
 		{
-			name:     "OnlyEscapedChars",
+			name:     "string with only escaped characters is unquoted correctly",
 			input:    `"\n\t"`,
 			expected: "\n\t",
 		},
 		{
-			name:     "LongString",
+			name:     "long string is unquoted correctly",
 			input:    `"The quick brown fox jumps over the lazy dog"`,
 			expected: "The quick brown fox jumps over the lazy dog",
 		},
 		{
-			name:     "StringWithNumbers",
+			name:     "string with numbers is unquoted correctly",
 			input:    `"test123"`,
 			expected: "test123",
 		},
 		{
-			name:     "JSONValue",
+			name:     "json value is unquoted correctly",
 			input:    `"{\"key\":\"value\"}"`,
 			expected: `{"key":"value"}`,
 		},
 		{
-			name:     "UnicodeLowercaseHex",
+			name:     "unicode lowercase hex is unquoted correctly",
 			input:    `"\u00e9"`,
 			expected: "é",
 		},
 		{
-			name:     "UnicodeEmoji",
+			name:     "unicode emoji is unquoted correctly",
 			input:    `"\ud83d\ude00"`,
 			expected: "😀",
 		},
 		{
-			name:     "UnicodeSurrogatePairHeart",
+			name:     "unicode surrogate pair heart is unquoted correctly",
 			input:    `"\ud83d\udc96"`,
 			expected: "💖",
 		},
 		{
-			name:     "UnicodeSurrogatePairRocket",
+			name:     "unicode surrogate pair rocket is unquoted correctly",
 			input:    `"\ud83d\ude80"`,
 			expected: "🚀",
 		},
 		{
-			name:     "MultipleEmojis",
+			name:     "multiple emojis are unquoted correctly",
 			input:    `"\ud83d\ude00\ud83d\udc96"`,
 			expected: "😀💖",
 		},
 		{
-			name:     "EmojiWithText",
+			name:     "emoji with text is unquoted correctly",
 			input:    `"Hello \ud83d\udc4b World"`,
 			expected: "Hello 👋 World",
 		},
 		{
-			name:     "ConsecutiveEscapes",
+			name:     "consecutive escapes are unquoted correctly",
 			input:    `"\\\\n"`,
 			expected: `\\n`,
 		},
@@ -178,119 +178,119 @@ func TestUnquoteInvalid(t *testing.T) {
 		input string
 	}{
 		{
-			name:  "NoQuotes",
+			name:  "string without quotes returns error",
 			input: "hello",
 		},
 		{
-			name:  "OnlyOpeningQuote",
+			name:  "string with only opening quote returns error",
 			input: `"hello`,
 		},
 		{
-			name:  "OnlyClosingQuote",
+			name:  "string with only closing quote returns error",
 			input: `hello"`,
 		},
 		{
-			name:  "SingleQuote",
+			name:  "single quote character returns error",
 			input: `"`,
 		},
 		{
-			name:  "EmptyInput",
+			name:  "empty input returns error",
 			input: "",
 		},
 		{
-			name:  "TrailingBackslash",
+			name:  "trailing backslash returns error",
 			input: `"hello\`,
 		},
 		{
-			name:  "TrailingBackslashBeforeQuote",
+			name:  "trailing backslash before quote returns error",
 			input: `"hello\"`,
 		},
 		{
-			name:  "InvalidEscapeX",
+			name:  "invalid escape sequence with x returns error",
 			input: `"hello\x"`,
 		},
 		{
-			name:  "InvalidEscapeV",
+			name:  "invalid escape sequence with v returns error",
 			input: `"hello\v"`,
 		},
 		{
-			name:  "InvalidEscapeA",
+			name:  "invalid escape sequence with a returns error",
 			input: `"hello\a"`,
 		},
 		{
-			name:  "InvalidEscapeDigit",
+			name:  "invalid escape sequence with digit returns error",
 			input: `"hello\0"`,
 		},
 		{
-			name:  "IncompleteUnicode3Chars",
+			name:  "incomplete unicode sequence with three chars returns error",
 			input: `"\u041"`,
 		},
 		{
-			name:  "IncompleteUnicode2Chars",
+			name:  "incomplete unicode sequence with two chars returns error",
 			input: `"\u04"`,
 		},
 		{
-			name:  "IncompleteUnicode1Char",
+			name:  "incomplete unicode sequence with one char returns error",
 			input: `"\u0"`,
 		},
 		{
-			name:  "IncompleteUnicodeNoChars",
+			name:  "incomplete unicode sequence with no chars returns error",
 			input: `"\u"`,
 		},
 		{
-			name:  "InvalidUnicodeHexG",
+			name:  "invalid unicode hex character g returns error",
 			input: `"\u00GG"`,
 		},
 		{
-			name:  "InvalidUnicodeHexSpace",
+			name:  "invalid unicode hex with space returns error",
 			input: `"\u00 0"`,
 		},
 		{
-			name:  "InvalidUnicodeHexMinus",
+			name:  "invalid unicode hex with minus returns error",
 			input: `"\u-001"`,
 		},
 		{
-			name:  "UnicodeAtEnd",
+			name:  "incomplete unicode sequence at end returns error",
 			input: `"hello\u123"`,
 		},
 		{
-			name:  "BackslashAtVeryEnd",
+			name:  "backslash at very end returns error",
 			input: `"test\`,
 		},
 		{
-			name:  "OnlyBackslash",
+			name:  "only backslash and quote returns error",
 			input: `"\"`,
 		},
 		{
-			name:  "UnterminatedString",
+			name:  "unterminated string returns error",
 			input: `"hello world`,
 		},
 		{
-			name:  "WrongQuoteType",
+			name:  "single quotes instead of double quotes returns error",
 			input: "'hello'",
 		},
 		{
-			name:  "HighSurrogateWithoutLow",
+			name:  "high surrogate without low surrogate returns error",
 			input: `"\ud83d"`,
 		},
 		{
-			name:  "HighSurrogateWithText",
+			name:  "high surrogate followed by text returns error",
 			input: `"\ud83dtext"`,
 		},
 		{
-			name:  "HighSurrogateWithNormalUnicode",
+			name:  "high surrogate followed by normal unicode returns error",
 			input: `"\ud83d\u0041"`,
 		},
 		{
-			name:  "LowSurrogateWithoutHigh",
+			name:  "low surrogate without high surrogate returns error",
 			input: `"\ude00"`,
 		},
 		{
-			name:  "LowSurrogateAlone",
+			name:  "low surrogate alone returns error",
 			input: `"\udc96"`,
 		},
 		{
-			name:  "HighSurrogateWithInvalidLow",
+			name:  "high surrogate with invalid low surrogate returns error",
 			input: `"\ud83d\uffff"`,
 		},
 	}

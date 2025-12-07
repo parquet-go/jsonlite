@@ -110,10 +110,15 @@ func nextToken(s string) (token, rest string, ok bool) {
 	}
 }
 
-// Parse parses JSON data and returns a pointer to the root Value.
+const DefaultMaxDepth = 1000
+
+// ParseMaxDepth parses JSON data with a maximum nesting depth for objects.
+// Objects at maxDepth <= 0 are stored unparsed and will be lazily parsed
+// when accessed via Lookup(), Array(), or Object() methods.
+// Depth is only decremented for objects, not arrays.
 // Returns an error if the JSON is malformed or empty.
-func Parse(data string) (*Value, error) {
-	v, rest, err := parseValue(data)
+func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
+	v, rest, err := parseValue(data, max(0, maxDepth))
 	if err != nil {
 		return nil, err
 	}
@@ -124,10 +129,14 @@ func Parse(data string) (*Value, error) {
 	return &v, nil
 }
 
+// Parse parses JSON data and returns a pointer to the root Value.
+// Returns an error if the JSON is malformed or empty.
+func Parse(data string) (*Value, error) { return ParseMaxDepth(data, DefaultMaxDepth) }
+
 // parseValue parses a JSON value from s.
 // Returns the parsed value, the remaining unparsed string, and any error.
 // The string is passed by value to keep it in registers.
-func parseValue(s string) (Value, string, error) {
+func parseValue(s string, maxDepth int) (Value, string, error) {
 	token, rest, ok := nextToken(s)
 	if !ok {
 		return Value{}, rest, errUnexpectedEndOfObject
@@ -155,9 +164,9 @@ func parseValue(s string) (Value, string, error) {
 		}
 		return makeStringValue(token), rest, nil
 	case '[':
-		return parseArray(s, rest)
+		return parseArray(s, rest, maxDepth)
 	case '{':
-		return parseObject(s, rest)
+		return parseObject(s, rest, maxDepth)
 	case ']':
 		return Value{}, rest, errEndOfArray
 	case '}':
@@ -172,7 +181,7 @@ func parseValue(s string) (Value, string, error) {
 	}
 }
 
-func parseArray(start, json string) (Value, string, error) {
+func parseArray(start, json string, maxDepth int) (Value, string, error) {
 	elements := make([]Value, 0, 32)
 
 	for i := 0; ; i++ {
@@ -194,7 +203,7 @@ func parseArray(start, json string) (Value, string, error) {
 			json = rest
 		}
 
-		v, rest, err := parseValue(json)
+		v, rest, err := parseValue(json, maxDepth)
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := start[:len(start)-len(rest)]
@@ -213,7 +222,26 @@ func parseArray(start, json string) (Value, string, error) {
 	}
 }
 
-func parseObject(start, json string) (Value, string, error) {
+func parseObject(start, json string, maxDepth int) (Value, string, error) {
+	if maxDepth <= 0 {
+		depth, remain := 1, json
+		for depth > 0 {
+			token, next, ok := nextToken(remain)
+			if !ok {
+				return Value{}, remain, errUnexpectedEndOfObject
+			}
+			remain = next
+			switch token {
+			case "{":
+				depth++
+			case "}":
+				depth--
+			}
+		}
+		json := start[:len(start)-len(remain)]
+		return makeUnparsedObjectValue(json), remain, nil
+	}
+
 	fields := make([]field, 0, 16)
 
 	for i := 0; ; i++ {
@@ -263,7 +291,7 @@ func parseObject(start, json string) (Value, string, error) {
 		}
 		json = rest
 
-		val, rest, err := parseValue(json)
+		val, rest, err := parseValue(json, maxDepth-1)
 		if err != nil {
 			return Value{}, json, fmt.Errorf("%q → %w", key, err)
 		}

@@ -1,6 +1,7 @@
 package jsonlite_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/parquet-go/jsonlite"
@@ -356,6 +357,297 @@ func BenchmarkParse(b *testing.B) {
 			b.SetBytes(int64(len(bm.input)))
 			for b.Loop() {
 				_, err := jsonlite.Parse(bm.input)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestParseMaxDepth(t *testing.T) {
+	t.Run("root object stored as unparsed when max depth is zero", func(t *testing.T) {
+		// maxDepth=0 means even root object is unparsed
+		val, err := jsonlite.ParseMaxDepth(`{"a":1}`, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if val.Kind() != jsonlite.Object {
+			t.Errorf("expected Object, got %v", val.Kind())
+		}
+		// Accessing should trigger lazy parse
+		v := val.Lookup("a")
+		if v == nil {
+			t.Error("expected to find 'a'")
+		} else if v.Int() != 1 {
+			t.Errorf("expected 1, got %d", v.Int())
+		}
+	})
+
+	t.Run("first level parsed and second level unparsed when max depth is one", func(t *testing.T) {
+		// maxDepth=1 means first level is parsed, second is not
+		val, err := jsonlite.ParseMaxDepth(`{"a":{"b":2}}`, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// First level should be parsed
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		// Second level should be unparsed (lazy)
+		b := a.Lookup("b")
+		if b == nil {
+			t.Error("expected to find 'b'")
+		} else if b.Int() != 2 {
+			t.Errorf("expected 2, got %d", b.Int())
+		}
+	})
+
+	t.Run("two levels parsed and third level unparsed when max depth is two", func(t *testing.T) {
+		// maxDepth=2 means two levels parsed, third is not
+		val, err := jsonlite.ParseMaxDepth(`{"a":{"b":{"c":3}}}`, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// First and second levels should be parsed
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		b := a.Lookup("b")
+		if b == nil {
+			t.Fatal("expected to find 'b'")
+		}
+		// Third level should be unparsed (lazy)
+		c := b.Lookup("c")
+		if c == nil {
+			t.Error("expected to find 'c'")
+		} else if c.Int() != 3 {
+			t.Errorf("expected 3, got %d", c.Int())
+		}
+	})
+
+	t.Run("arrays do not increment the depth counter", func(t *testing.T) {
+		// Arrays should not increment depth
+		val, err := jsonlite.ParseMaxDepth(`{"a":[{"b":1}]}`, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// First level object is parsed
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		// Array doesn't increment depth, so nested object is still depth 1
+		var found bool
+		for elem := range a.Array() {
+			b := elem.Lookup("b")
+			if b != nil && b.Int() == 1 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected to find b=1 in array")
+		}
+	})
+
+	t.Run("empty object at max depth can be iterated", func(t *testing.T) {
+		val, err := jsonlite.ParseMaxDepth(`{"a":{}}`, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		// Should be able to iterate over empty object
+		count := 0
+		for range a.Object() {
+			count++
+		}
+		if count != 0 {
+			t.Errorf("expected 0 fields, got %d", count)
+		}
+	})
+
+	t.Run("calling len on unparsed value triggers parsing", func(t *testing.T) {
+		val, err := jsonlite.ParseMaxDepth(`{"a":{"x":1,"y":2,"z":3}}`, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		// Len should trigger parsing
+		if a.Len() != 3 {
+			t.Errorf("expected length 3, got %d", a.Len())
+		}
+	})
+
+	t.Run("calling JSON on unparsed value returns cached content without parsing", func(t *testing.T) {
+		val, err := jsonlite.ParseMaxDepth(`{"a":{"b":1}}`, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		// JSON() should return cached JSON without parsing
+		json := a.JSON()
+		if json != `{"b":1}` {
+			t.Errorf("expected {\"b\":1}, got %s", json)
+		}
+	})
+
+	t.Run("calling compact on unparsed value triggers parsing", func(t *testing.T) {
+		val, err := jsonlite.ParseMaxDepth(`{"a": {"b": 1}}`, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := val.Lookup("a")
+		if a == nil {
+			t.Fatal("expected to find 'a'")
+		}
+		// Compact should parse first, then compact
+		compact := string(a.Compact(nil))
+		if compact != `{"b":1}` {
+			t.Errorf("expected {\"b\":1}, got %s", compact)
+		}
+	})
+}
+
+func TestLazyParsingCorrectness(t *testing.T) {
+	// Complex nested structure
+	input := `{
+		"users": [
+			{
+				"name": "Alice",
+				"profile": {
+					"age": 30,
+					"settings": {
+						"theme": "dark"
+					}
+				}
+			},
+			{
+				"name": "Bob",
+				"profile": {
+					"age": 25,
+					"settings": {
+						"theme": "light"
+					}
+				}
+			}
+		]
+	}`
+
+	// Parse with different depths and verify same results
+	depths := []int{0, 1, 2, 3, 1000}
+	var results []string
+
+	for _, depth := range depths {
+		val, err := jsonlite.ParseMaxDepth(input, depth)
+		if err != nil {
+			t.Fatalf("depth %d: %v", depth, err)
+		}
+
+		users := val.Lookup("users")
+		if users == nil {
+			t.Fatalf("depth %d: expected to find 'users'", depth)
+		}
+
+		var buf []byte
+		for user := range users.Array() {
+			name := user.Lookup("name")
+			profile := user.Lookup("profile")
+			age := profile.Lookup("age")
+			settings := profile.Lookup("settings")
+			theme := settings.Lookup("theme")
+
+			buf = append(buf, name.String()...)
+			buf = append(buf, ':')
+			buf = append(buf, []byte(fmt.Sprintf("%d", age.Int()))...)
+			buf = append(buf, ':')
+			buf = append(buf, theme.String()...)
+			buf = append(buf, ';')
+		}
+
+		results = append(results, string(buf))
+	}
+
+	// All results should be identical
+	expected := results[0]
+	for i, result := range results {
+		if result != expected {
+			t.Errorf("depth %d produced different result:\nexpected: %s\ngot: %s", depths[i], expected, result)
+		}
+	}
+}
+
+func BenchmarkParseMaxDepth(b *testing.B) {
+	benchmarks := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "Small",
+			input: `{"name":"test","age":42,"active":true}`,
+		},
+		{
+			name: "Medium",
+			input: `{
+				"name": "test",
+				"age": 42,
+				"active": true,
+				"tags": ["a", "b", "c"],
+				"metadata": {
+					"created": "2024-01-01",
+					"updated": null
+				}
+			}`,
+		},
+		{
+			name: "Large",
+			input: `{
+				"users": [
+					{"id":1,"name":"Alice","email":"alice@example.com","active":true},
+					{"id":2,"name":"Bob","email":"bob@example.com","active":false},
+					{"id":3,"name":"Charlie","email":"charlie@example.com","active":true}
+				],
+				"metadata": {
+					"total": 3,
+					"page": 1,
+					"perPage": 10,
+					"filters": {
+						"status": "active",
+						"role": ["admin", "user"],
+						"createdAfter": "2024-01-01T00:00:00Z"
+					}
+				},
+				"stats": {
+					"activeUsers": 2,
+					"inactiveUsers": 1,
+					"averageAge": 28.5,
+					"tags": ["production", "verified", "premium"]
+				}
+			}`,
+		},
+		{
+			name:  "CloudLogging",
+			input: cloudLoggingPayload,
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(bm.input)))
+			for b.Loop() {
+				_, err := jsonlite.ParseMaxDepth(bm.input, 1)
 				if err != nil {
 					b.Fatal(err)
 				}
