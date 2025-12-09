@@ -2,7 +2,6 @@ package jsonlite
 
 import (
 	"fmt"
-	"iter"
 	"math"
 	"strconv"
 	"time"
@@ -415,153 +414,149 @@ func (it *Iterator) Time() (time.Time, error) {
 	}
 }
 
-// Object returns an iterator over the key-value pairs of the current object.
+// Object iterates over the key-value pairs of the current object.
 // The iterator yields the key for each field, and the Iterator is positioned
 // on the field's value. Call Kind(), Value(), Object(), or Array() to process
 // the value. If the value is not consumed before the next iteration, it will
 // be automatically skipped.
-// For null values, returns an empty iterator (no iterations).
+// For null values, no iterations occur.
 //
 // Must only be called when Kind() == Object or Kind() == Null.
-func (it *Iterator) Object() iter.Seq2[string, error] {
-	return func(yield func(string, error) bool) {
-		if it.kind == Null {
-			return // null is treated as empty object
+func (it *Iterator) Object(yield func(string, error) bool) {
+	if it.kind == Null {
+		return // null is treated as empty object
+	}
+	it.consumed = true // mark the object itself as consumed
+	for i := 0; ; i++ {
+		// Auto-consume the previous value if it wasn't consumed
+		if !it.consumed {
+			switch it.kind {
+			case Array:
+				it.consumed = true
+				it.skipArray()
+			case Object:
+				it.consumed = true
+				it.skipObject()
+			}
 		}
-		it.consumed = true // mark the object itself as consumed
-		for i := 0; ; i++ {
-			// Auto-consume the previous value if it wasn't consumed
-			if !it.consumed {
-				switch it.kind {
-				case Array:
-					it.consumed = true
-					it.skipArray()
-				case Object:
-					it.consumed = true
-					it.skipObject()
-				}
-			}
 
-			token, ok := it.tokens.Next()
+		token, ok := it.tokens.Next()
+		if !ok {
+			it.setError(errUnexpectedEndOfObject)
+			yield("", it.err)
+			return
+		}
+
+		if token == "}" {
+			it.pop()
+			return
+		}
+
+		if i != 0 {
+			if token != "," {
+				it.setErrorf("expected ',', got %q", token)
+				yield("", it.err)
+				return
+			}
+			token, ok = it.tokens.Next()
 			if !ok {
 				it.setError(errUnexpectedEndOfObject)
 				yield("", it.err)
 				return
 			}
+		}
 
-			if token == "}" {
-				it.pop()
-				return
-			}
+		key, err := Unquote(token)
+		if err != nil {
+			it.setErrorf("invalid key: %q: %w", token, err)
+			yield("", it.err)
+			return
+		}
 
-			if i != 0 {
-				if token != "," {
-					it.setErrorf("expected ',', got %q", token)
-					yield("", it.err)
-					return
-				}
-				token, ok = it.tokens.Next()
-				if !ok {
-					it.setError(errUnexpectedEndOfObject)
-					yield("", it.err)
-					return
-				}
-			}
+		colon, ok := it.tokens.Next()
+		if !ok {
+			it.setError(errUnexpectedEndOfObject)
+			yield("", it.err)
+			return
+		}
+		if colon != ":" {
+			it.setErrorf("expected ':', got %q", colon)
+			yield("", it.err)
+			return
+		}
 
-			key, err := Unquote(token)
-			if err != nil {
-				it.setErrorf("invalid key: %q: %w", token, err)
-				yield("", it.err)
-				return
-			}
+		value, ok := it.tokens.Next()
+		if !ok {
+			it.setError(errUnexpectedEndOfObject)
+			yield("", it.err)
+			return
+		}
 
-			colon, ok := it.tokens.Next()
-			if !ok {
-				it.setError(errUnexpectedEndOfObject)
-				yield("", it.err)
-				return
-			}
-			if colon != ":" {
-				it.setErrorf("expected ':', got %q", colon)
-				yield("", it.err)
-				return
-			}
+		it.setKey(key)
+		it.setToken(value)
 
-			value, ok := it.tokens.Next()
-			if !ok {
-				it.setError(errUnexpectedEndOfObject)
-				yield("", it.err)
-				return
-			}
-
-			it.setKey(key)
-			it.setToken(value)
-
-			if !yield(key, nil) {
-				return
-			}
+		if !yield(key, nil) {
+			return
 		}
 	}
 }
 
-// Array returns an iterator over the elements of the current array.
+// Array iterates over the elements of the current array.
 // The iterator yields the index for each element, and the Iterator is
 // positioned on the element's value. Call Kind(), Value(), Object(), or
 // Array() to process the value. If the value is not consumed before the
 // next iteration, it will be automatically skipped.
-// For null values, returns an empty iterator (no iterations).
+// For null values, no iterations occur.
 //
 // Must only be called when Kind() == Array or Kind() == Null.
-func (it *Iterator) Array() iter.Seq2[int, error] {
-	return func(yield func(int, error) bool) {
-		if it.kind == Null {
-			return // null is treated as empty array
-		}
-		it.consumed = true // mark the array itself as consumed
-		for i := 0; ; i++ {
-			// Auto-consume the previous value if it wasn't consumed
-			if !it.consumed {
-				switch it.kind {
-				case Array:
-					it.consumed = true
-					it.skipArray()
-				case Object:
-					it.consumed = true
-					it.skipObject()
-				}
+func (it *Iterator) Array(yield func(int, error) bool) {
+	if it.kind == Null {
+		return // null is treated as empty array
+	}
+	it.consumed = true // mark the array itself as consumed
+	for i := 0; ; i++ {
+		// Auto-consume the previous value if it wasn't consumed
+		if !it.consumed {
+			switch it.kind {
+			case Array:
+				it.consumed = true
+				it.skipArray()
+			case Object:
+				it.consumed = true
+				it.skipObject()
 			}
+		}
 
-			token, ok := it.tokens.Next()
+		token, ok := it.tokens.Next()
+		if !ok {
+			it.setError(errUnexpectedEndOfArray)
+			yield(i, it.err)
+			return
+		}
+
+		if token == "]" {
+			it.pop()
+			return
+		}
+
+		if i != 0 {
+			if token != "," {
+				it.setErrorf("expected ',', got %q", token)
+				yield(i, it.err)
+				return
+			}
+			token, ok = it.tokens.Next()
 			if !ok {
 				it.setError(errUnexpectedEndOfArray)
 				yield(i, it.err)
 				return
 			}
+		}
 
-			if token == "]" {
-				it.pop()
-				return
-			}
+		it.setToken(token)
 
-			if i != 0 {
-				if token != "," {
-					it.setErrorf("expected ',', got %q", token)
-					yield(i, it.err)
-					return
-				}
-				token, ok = it.tokens.Next()
-				if !ok {
-					it.setError(errUnexpectedEndOfArray)
-					yield(i, it.err)
-					return
-				}
-			}
-
-			it.setToken(token)
-
-			if !yield(i, nil) {
-				return
-			}
+		if !yield(i, nil) {
+			return
 		}
 	}
 }

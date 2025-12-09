@@ -441,7 +441,7 @@ func TestParseMaxDepth(t *testing.T) {
 		}
 		// Array doesn't increment depth, so nested object is still depth 1
 		var found bool
-		for elem := range a.Array() {
+		for elem := range a.Array {
 			b := elem.Lookup("b")
 			if b != nil && b.Int() == 1 {
 				found = true
@@ -464,7 +464,7 @@ func TestParseMaxDepth(t *testing.T) {
 		}
 		// Should be able to iterate over empty object
 		count := 0
-		for range a.Object() {
+		for range a.Object {
 			count++
 		}
 		if count != 0 {
@@ -561,7 +561,7 @@ func TestLazyParsingCorrectness(t *testing.T) {
 		}
 
 		var buf []byte
-		for user := range users.Array() {
+		for user := range users.Array {
 			name := user.Lookup("name")
 			profile := user.Lookup("profile")
 			age := profile.Lookup("age")

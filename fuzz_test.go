@@ -210,7 +210,7 @@ func compareValues(t *testing.T, input string, std any, val *jsonlite.Value) {
 				t.Errorf("input %q: array length mismatch: got %d, want %d", input, val.Len(), len(v))
 			} else {
 				i := 0
-				for elem := range val.Array() {
+				for elem := range val.Array {
 					compareValues(t, input, v[i], elem)
 					i++
 				}
@@ -230,7 +230,7 @@ func compareValues(t *testing.T, input string, std any, val *jsonlite.Value) {
 			if val.Len() != len(v) {
 				return
 			}
-			for key, fieldVal := range val.Object() {
+			for key, fieldVal := range val.Object {
 				stdField, ok := v[key]
 				if !ok {
 					t.Errorf("input %q: unexpected field %q", input, key)
@@ -386,7 +386,7 @@ func FuzzIteratorObjectArray(f *testing.F) {
 		consumeValue = func() error {
 			switch iter.Kind() {
 			case jsonlite.Object:
-				for key, err := range iter.Object() {
+				for key, err := range iter.Object {
 					if err != nil {
 						return err
 					}
@@ -396,7 +396,7 @@ func FuzzIteratorObjectArray(f *testing.F) {
 					}
 				}
 			case jsonlite.Array:
-				for idx, err := range iter.Array() {
+				for idx, err := range iter.Array {
 					if err != nil {
 						return err
 					}

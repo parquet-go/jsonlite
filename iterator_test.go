@@ -213,7 +213,7 @@ func TestIteratorNestedValue(t *testing.T) {
 
 	// Collect array elements
 	var arr []*jsonlite.Value
-	for v := range val.Array() {
+	for v := range val.Array {
 		arr = append(arr, v)
 	}
 
@@ -252,7 +252,7 @@ func TestIteratorObjectSeq(t *testing.T) {
 
 	// Use Object() to iterate over fields
 	fields := make(map[string]jsonlite.Kind)
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -290,7 +290,7 @@ func TestIteratorArraySeq(t *testing.T) {
 	expectedKinds := []jsonlite.Kind{jsonlite.Number, jsonlite.String, jsonlite.True, jsonlite.Null}
 	var gotKinds []jsonlite.Kind
 
-	for idx, err := range iter.Array() {
+	for idx, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -321,7 +321,7 @@ func TestIteratorNestedObjectArray(t *testing.T) {
 
 	var names []string
 
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -329,14 +329,14 @@ func TestIteratorNestedObjectArray(t *testing.T) {
 			if iter.Kind() != jsonlite.Array {
 				t.Fatalf("expected Array for users, got %v", iter.Kind())
 			}
-			for _, err := range iter.Array() {
+			for _, err := range iter.Array {
 				if err != nil {
 					t.Fatal(err)
 				}
 				if iter.Kind() != jsonlite.Object {
 					t.Fatalf("expected Object in users array, got %v", iter.Kind())
 				}
-				for k, err := range iter.Object() {
+				for k, err := range iter.Object {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -373,12 +373,12 @@ func TestIteratorNestedArrays(t *testing.T) {
 	}
 
 	var results [][]int64
-	for _, err := range iter.Array() {
+	for _, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
 		var inner []int64
-		for _, err := range iter.Array() {
+		for _, err := range iter.Array {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -407,12 +407,12 @@ func TestIteratorNestedObjects(t *testing.T) {
 	}
 
 	results := make(map[string]map[string]int64)
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
 		inner := make(map[string]int64)
-		for innerKey, err := range iter.Object() {
+		for innerKey, err := range iter.Object {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -450,17 +450,17 @@ func TestIteratorMixedNesting(t *testing.T) {
 	}
 	var items []item
 
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
 		if key == "items" {
-			for _, err := range iter.Array() {
+			for _, err := range iter.Array {
 				if err != nil {
 					t.Fatal(err)
 				}
 				var it item
-				for field, err := range iter.Object() {
+				for field, err := range iter.Object {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -471,7 +471,7 @@ func TestIteratorMixedNesting(t *testing.T) {
 							t.Fatal(err)
 						}
 					case "tags":
-						for _, err := range iter.Array() {
+						for _, err := range iter.Array {
 							if err != nil {
 								t.Fatal(err)
 							}
@@ -509,7 +509,7 @@ func TestIteratorSkipNestedArray(t *testing.T) {
 	}
 
 	var keepValue string
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -537,7 +537,7 @@ func TestIteratorSkipNestedObject(t *testing.T) {
 	}
 
 	var keepValue int64
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -565,13 +565,13 @@ func TestIteratorAlternateConsumeSkip(t *testing.T) {
 	}
 
 	var objectValues []int64
-	for i, err := range iter.Array() {
+	for i, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Only consume objects (at even indices)
 		if i%2 == 0 {
-			for _, err := range iter.Object() {
+			for _, err := range iter.Object {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -602,7 +602,7 @@ func TestIteratorConsumeWithValue(t *testing.T) {
 
 	var nestedValue *jsonlite.Value
 	var simpleValue int64
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -642,7 +642,7 @@ func TestIteratorEmptyNestedStructures(t *testing.T) {
 
 	var keys []string
 	var afterValue string
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -650,7 +650,7 @@ func TestIteratorEmptyNestedStructures(t *testing.T) {
 		switch key {
 		case "empty_arr":
 			count := 0
-			for _, err := range iter.Array() {
+			for _, err := range iter.Array {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -661,7 +661,7 @@ func TestIteratorEmptyNestedStructures(t *testing.T) {
 			}
 		case "empty_obj":
 			count := 0
-			for _, err := range iter.Object() {
+			for _, err := range iter.Object {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -672,7 +672,7 @@ func TestIteratorEmptyNestedStructures(t *testing.T) {
 			}
 		case "arr_of_empty":
 			count := 0
-			for _, err := range iter.Array() {
+			for _, err := range iter.Array {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -709,23 +709,23 @@ func TestIteratorDeeplyNested(t *testing.T) {
 	}
 
 	var value int64
-	for _, err := range iter.Object() { // l1
+	for _, err := range iter.Object { // l1
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, err := range iter.Object() { // l2
+		for _, err := range iter.Object { // l2
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, err := range iter.Object() { // l3
+			for _, err := range iter.Object { // l3
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, err := range iter.Object() { // l4
+				for _, err := range iter.Object { // l4
 					if err != nil {
 						t.Fatal(err)
 					}
-					for key, err := range iter.Object() { // value
+					for key, err := range iter.Object { // value
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -757,11 +757,11 @@ func TestIteratorArrayOfArrays(t *testing.T) {
 
 	// Only get first element of each inner array
 	var firstElements []int64
-	for _, err := range iter.Array() {
+	for _, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i, err := range iter.Array() {
+		for i, err := range iter.Array {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -792,11 +792,11 @@ func TestIteratorObjectValueThenSkip(t *testing.T) {
 	}
 
 	var ids []int64
-	for _, err := range iter.Array() {
+	for _, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for key, err := range iter.Object() {
+		for key, err := range iter.Object {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -828,18 +828,18 @@ func TestIteratorBreakFromNestedLoop(t *testing.T) {
 
 	var foundId int64
 	var otherValue string
-outer:
-	for key, err := range iter.Object() {
+outerLoop:
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
 		switch key {
 		case "items":
-			for _, err := range iter.Array() {
+			for _, err := range iter.Array {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for field, err := range iter.Object() {
+				for field, err := range iter.Object {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -851,9 +851,12 @@ outer:
 						if foundId == 2 {
 							// Found what we want, but we're mid-iteration
 							// This tests that we handle partial iteration correctly
-							break outer
+							break outerLoop
 						}
 					}
+				}
+				if foundId == 2 {
+					break
 				}
 			}
 		case "other":
@@ -861,6 +864,9 @@ outer:
 			if err != nil {
 				t.Fatal(err)
 			}
+		}
+		if foundId == 2 {
+			break
 		}
 	}
 
@@ -884,14 +890,14 @@ func TestIteratorNullObject(t *testing.T) {
 
 	var afterValue string
 	var dataIterations int
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
 		switch key {
 		case "data":
 			// Iterate over null as if it were an object - should yield nothing
-			for _, err := range iter.Object() {
+			for _, err := range iter.Object {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -924,14 +930,14 @@ func TestIteratorNullArray(t *testing.T) {
 
 	var afterValue string
 	var itemIterations int
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
 		switch key {
 		case "items":
 			// Iterate over null as if it were an array - should yield nothing
-			for _, err := range iter.Array() {
+			for _, err := range iter.Array {
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -964,7 +970,7 @@ func TestIteratorNullInArray(t *testing.T) {
 
 	var values []int64
 	var nullCount int
-	for _, err := range iter.Array() {
+	for _, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1002,7 +1008,7 @@ func TestIteratorNullValuesInObject(t *testing.T) {
 	var name string
 	var age int64
 	var active bool
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1047,7 +1053,7 @@ func TestIteratorObjectAutoConsume(t *testing.T) {
 	}
 
 	var keys []string
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1081,7 +1087,7 @@ func TestIteratorArrayAutoConsume(t *testing.T) {
 	}
 
 	var count int
-	for _, err := range iter.Array() {
+	for _, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1109,7 +1115,7 @@ func TestIteratorNestedAutoConsume(t *testing.T) {
 
 	// Only iterate over top-level keys, not consuming any values
 	var keys []string
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1142,7 +1148,7 @@ func TestIteratorPartialConsume(t *testing.T) {
 	}
 
 	results := make(map[string]interface{})
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1183,7 +1189,7 @@ func TestIteratorArrayPartialConsume(t *testing.T) {
 	}
 
 	var numbers []int64
-	for idx, err := range iter.Array() {
+	for idx, err := range iter.Array {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1222,9 +1228,9 @@ func TestIteratorEmptyRangeObject(t *testing.T) {
 		t.Fatal("expected at least one value")
 	}
 
-	// Just range, don't use the values at all (testing the for range iter.Object() {} pattern)
+	// Just range, don't use the values at all (testing the for range iter.Object {} pattern)
 	count := 0
-	for range iter.Object() {
+	for range iter.Object {
 		count++
 	}
 
@@ -1246,9 +1252,9 @@ func TestIteratorEmptyRangeArray(t *testing.T) {
 		t.Fatal("expected at least one value")
 	}
 
-	// Just range, don't use the values at all (testing the for range iter.Array() {} pattern)
+	// Just range, don't use the values at all (testing the for range iter.Array {} pattern)
 	count := 0
-	for range iter.Array() {
+	for range iter.Array {
 		count++
 	}
 
@@ -1274,7 +1280,7 @@ func TestIteratorValueNoAlloc(t *testing.T) {
 		if !iter.Next() {
 			t.Fatal("expected at least one value")
 		}
-		for _, err := range iter.Object() {
+		for _, err := range iter.Object {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1556,7 +1562,7 @@ func TestIteratorTypedValuesInObject(t *testing.T) {
 	}
 
 	results := make(map[string]interface{})
-	for key, err := range iter.Object() {
+	for key, err := range iter.Object {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1611,5 +1617,79 @@ func TestIteratorTypedValuesInObject(t *testing.T) {
 
 	if !reflect.DeepEqual(results, expected) {
 		t.Errorf("expected %v, got %v", expected, results)
+	}
+}
+
+func BenchmarkIteratorObject(b *testing.B) {
+	benchmarks := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "small_object",
+			input: `{"a":1,"b":2,"c":3}`,
+		},
+		{
+			name:  "medium_object",
+			input: `{"name":"John","age":30,"email":"john@example.com","city":"NYC","country":"USA","active":true,"score":95.5,"tags":["tag1","tag2"],"nested":{"x":1,"y":2}}`,
+		},
+		{
+			name:  "large_object",
+			input: `{"field1":"value1","field2":"value2","field3":"value3","field4":"value4","field5":"value5","field6":"value6","field7":"value7","field8":"value8","field9":"value9","field10":"value10","field11":"value11","field12":"value12","field13":"value13","field14":"value14","field15":"value15","field16":"value16","field17":"value17","field18":"value18","field19":"value19","field20":"value20"}`,
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				it := jsonlite.Iterate(bm.input)
+				if !it.Next() {
+					b.Fatal("expected object")
+				}
+				for _, err := range it.Object {
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkIteratorArray(b *testing.B) {
+	benchmarks := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "small_array",
+			input: `[1,2,3]`,
+		},
+		{
+			name:  "medium_array",
+			input: `[1,2,3,4,5,6,7,8,9,10,"a","b","c","d","e",true,false,null,{"x":1},{"y":2}]`,
+		},
+		{
+			name:  "large_array",
+			input: `[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50]`,
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				it := jsonlite.Iterate(bm.input)
+				if !it.Next() {
+					b.Fatal("expected array")
+				}
+				for _, err := range it.Array {
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
 	}
 }

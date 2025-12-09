@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/maphash"
-	"iter"
 	"math"
 	"strconv"
 	"strings"
@@ -169,42 +168,38 @@ func (v *Value) JSON() string {
 	}
 }
 
-// Array returns the value as a slice of Values.
+// Array iterates over the array elements.
 // Panics if the value is not an array.
-func (v *Value) Array() iter.Seq[*Value] {
+func (v *Value) Array(yield func(*Value) bool) {
 	if v.Kind() != Array {
 		panic("jsonlite: Array called on non-array value")
 	}
-	return func(yield func(*Value) bool) {
-		parsed := v
-		if v.unparsed() {
-			parsed = v.parse()
-		}
-		elems := unsafe.Slice((*Value)(parsed.p), parsed.len())[1:]
-		for i := range elems {
-			if !yield(&elems[i]) {
-				return
-			}
+	parsed := v
+	if v.unparsed() {
+		parsed = v.parse()
+	}
+	elems := unsafe.Slice((*Value)(parsed.p), parsed.len())[1:]
+	for i := range elems {
+		if !yield(&elems[i]) {
+			return
 		}
 	}
 }
 
-// Object returns the value as a slice of key/value pairs.
+// Object iterates over the object's key/value pairs.
 // Panics if the value is not an object.
-func (v *Value) Object() iter.Seq2[string, *Value] {
+func (v *Value) Object(yield func(string, *Value) bool) {
 	if v.Kind() != Object {
 		panic("jsonlite: Object called on non-object value")
 	}
-	return func(yield func(string, *Value) bool) {
-		parsed := v
-		if v.unparsed() {
-			parsed = v.parse()
-		}
-		fields := unsafe.Slice((*field)(parsed.p), parsed.len())[1:]
-		for i := range fields {
-			if !yield(fields[i].k, &fields[i].v) {
-				return
-			}
+	parsed := v
+	if v.unparsed() {
+		parsed = v.parse()
+	}
+	fields := unsafe.Slice((*field)(parsed.p), parsed.len())[1:]
+	for i := range fields {
+		if !yield(fields[i].k, &fields[i].v) {
+			return
 		}
 	}
 }
@@ -236,6 +231,34 @@ func (v *Value) Lookup(k string) *Value {
 		}
 		offset = j
 	}
+}
+
+// LookupPath searches for a nested field by following a path of keys.
+// Returns nil if any key in the path is not found.
+// Panics if any intermediate value is not an object.
+// If path is empty, returns the value itself.
+func (v *Value) LookupPath(path ...string) *Value {
+	for _, key := range path {
+		if v == nil {
+			return nil
+		}
+		v = v.Lookup(key)
+	}
+	return v
+}
+
+// Index returns the value at index i in an array.
+// Panics if the value is not an array or if the index is out of range.
+func (v *Value) Index(i int) *Value {
+	if v.Kind() != Array {
+		panic("jsonlite: Index called on non-array value")
+	}
+	parsed := v
+	if v.unparsed() {
+		parsed = v.parse()
+	}
+	elems := unsafe.Slice((*Value)(parsed.p), parsed.len())[1:]
+	return &elems[i]
 }
 
 // NumberType returns the classification of the number (int, uint, or float).
@@ -535,7 +558,7 @@ func (v *Value) Compact(buf []byte) []byte {
 		}
 		buf = append(buf, '[')
 		var count int
-		for elem := range parsed.Array() {
+		for elem := range parsed.Array {
 			if count > 0 {
 				buf = append(buf, ',')
 			}
@@ -550,7 +573,7 @@ func (v *Value) Compact(buf []byte) []byte {
 		}
 		buf = append(buf, '{')
 		var count int
-		for k, v := range parsed.Object() {
+		for k, v := range parsed.Object {
 			if count > 0 {
 				buf = append(buf, ',')
 			}

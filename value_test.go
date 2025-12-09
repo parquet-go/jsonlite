@@ -130,6 +130,146 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+func TestIndex(t *testing.T) {
+	input := `[1,"hello",true,{"a":1},[2,3]]`
+	val, err := jsonlite.Parse(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test valid indices
+	if v := val.Index(0); v == nil {
+		t.Error("expected to find index 0")
+	} else if v.Kind() != jsonlite.Number || v.Int() != 1 {
+		t.Errorf("expected Number(1) at index 0, got %v(%v)", v.Kind(), v.Int())
+	}
+
+	if v := val.Index(1); v == nil {
+		t.Error("expected to find index 1")
+	} else if v.String() != "hello" {
+		t.Errorf("expected 'hello' at index 1, got %q", v.String())
+	}
+
+	if v := val.Index(2); v == nil {
+		t.Error("expected to find index 2")
+	} else if v.Kind() != jsonlite.True {
+		t.Errorf("expected True at index 2, got %v", v.Kind())
+	}
+
+	if v := val.Index(3); v == nil {
+		t.Error("expected to find index 3")
+	} else if v.Kind() != jsonlite.Object {
+		t.Errorf("expected Object at index 3, got %v", v.Kind())
+	}
+
+	if v := val.Index(4); v == nil {
+		t.Error("expected to find index 4")
+	} else if v.Kind() != jsonlite.Array {
+		t.Errorf("expected Array at index 4, got %v", v.Kind())
+	}
+
+	// Test empty array
+	emptyArray, err := jsonlite.Parse(`[]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This should panic with out of range
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for out of range index on empty array")
+		}
+	}()
+	_ = emptyArray.Index(0)
+}
+
+func TestLookupPath(t *testing.T) {
+	input := `{
+		"user": {
+			"profile": {
+				"name": "Alice",
+				"email": "alice@example.com"
+			},
+			"settings": {
+				"theme": "dark"
+			}
+		},
+		"data": {
+			"value": 42
+		}
+	}`
+	val, err := jsonlite.Parse(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test empty path - should return the value itself
+	if v := val.LookupPath(); v != val {
+		t.Error("expected LookupPath() with empty path to return self")
+	}
+
+	// Test single element path - same as Lookup
+	if v := val.LookupPath("user"); v == nil {
+		t.Error("expected to find 'user'")
+	} else if v.Kind() != jsonlite.Object {
+		t.Errorf("expected Object for 'user', got %v", v.Kind())
+	}
+
+	// Test multiple element path
+	if v := val.LookupPath("user", "profile", "name"); v == nil {
+		t.Error("expected to find user.profile.name")
+	} else if v.String() != "Alice" {
+		t.Errorf("expected 'Alice', got %q", v.String())
+	}
+
+	if v := val.LookupPath("user", "profile", "email"); v == nil {
+		t.Error("expected to find user.profile.email")
+	} else if v.String() != "alice@example.com" {
+		t.Errorf("expected 'alice@example.com', got %q", v.String())
+	}
+
+	if v := val.LookupPath("user", "settings", "theme"); v == nil {
+		t.Error("expected to find user.settings.theme")
+	} else if v.String() != "dark" {
+		t.Errorf("expected 'dark', got %q", v.String())
+	}
+
+	if v := val.LookupPath("data", "value"); v == nil {
+		t.Error("expected to find data.value")
+	} else if v.Int() != 42 {
+		t.Errorf("expected 42, got %d", v.Int())
+	}
+
+	// Test path where intermediate key doesn't exist
+	if v := val.LookupPath("user", "nonexistent", "field"); v != nil {
+		t.Error("expected nil for path with non-existent intermediate key")
+	}
+
+	// Test path where final key doesn't exist
+	if v := val.LookupPath("user", "profile", "nonexistent"); v != nil {
+		t.Error("expected nil for path with non-existent final key")
+	}
+
+	// Test path starting with non-existent key
+	if v := val.LookupPath("nonexistent", "field"); v != nil {
+		t.Error("expected nil for path starting with non-existent key")
+	}
+
+	// Test non-object intermediate value - should panic
+	nonObjectInput := `{"field": "value"}`
+	nonObjVal, err := jsonlite.Parse(nonObjectInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for non-object intermediate value")
+		}
+	}()
+	_ = nonObjVal.LookupPath("field", "nested")
+}
+
 func TestLookupComprehensive(t *testing.T) {
 	t.Run("EmptyObject", func(t *testing.T) {
 		val, err := jsonlite.Parse(`{}`)
@@ -265,7 +405,7 @@ func TestLookupComprehensive(t *testing.T) {
 		}
 
 		// Verify all keys can still be found
-		for k, v := range val.Object() {
+		for k, v := range val.Object {
 			found := val.Lookup(k)
 			if found == nil {
 				t.Errorf("failed to lookup key %q that exists in object", k)
@@ -562,10 +702,10 @@ func valuesEqual(a, b jsonlite.Value) bool {
 		}
 		// Collect array elements
 		var aElems, bElems []*jsonlite.Value
-		for v := range a.Array() {
+		for v := range a.Array {
 			aElems = append(aElems, v)
 		}
-		for v := range b.Array() {
+		for v := range b.Array {
 			bElems = append(bElems, v)
 		}
 		for i := range aElems {
@@ -579,7 +719,7 @@ func valuesEqual(a, b jsonlite.Value) bool {
 			return false
 		}
 		// Check each key in a exists in b with equal value
-		for key, aVal := range a.Object() {
+		for key, aVal := range a.Object {
 			bVal := b.Lookup(key)
 			if bVal == nil {
 				return false
@@ -632,28 +772,32 @@ func TestValueSafetyChecks(t *testing.T) {
 			name:  "calling array on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
-				_ = v.Array()
+				for range v.Array {
+				}
 			},
 		},
 		{
 			name:  "calling array on number value panics",
 			input: "42",
 			operation: func(v *jsonlite.Value) {
-				_ = v.Array()
+				for range v.Array {
+				}
 			},
 		},
 		{
 			name:  "calling object on string value panics",
 			input: `"hello"`,
 			operation: func(v *jsonlite.Value) {
-				_ = v.Object()
+				for range v.Object {
+				}
 			},
 		},
 		{
 			name:  "calling object on array value panics",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
-				_ = v.Object()
+				for range v.Object {
+				}
 			},
 		},
 		{
@@ -703,6 +847,41 @@ func TestValueSafetyChecks(t *testing.T) {
 			input: "false",
 			operation: func(v *jsonlite.Value) {
 				_ = v.Len()
+			},
+		},
+		{
+			name:  "calling index on object value panics",
+			input: `{"a":1}`,
+			operation: func(v *jsonlite.Value) {
+				_ = v.Index(0)
+			},
+		},
+		{
+			name:  "calling index on string value panics",
+			input: `"hello"`,
+			operation: func(v *jsonlite.Value) {
+				_ = v.Index(0)
+			},
+		},
+		{
+			name:  "calling index on number value panics",
+			input: "42",
+			operation: func(v *jsonlite.Value) {
+				_ = v.Index(0)
+			},
+		},
+		{
+			name:  "calling lookup_path on array value panics",
+			input: "[1,2,3]",
+			operation: func(v *jsonlite.Value) {
+				_ = v.LookupPath("key")
+			},
+		},
+		{
+			name:  "calling lookup_path on string value panics",
+			input: `"hello"`,
+			operation: func(v *jsonlite.Value) {
+				_ = v.LookupPath("key")
 			},
 		},
 	}
@@ -771,14 +950,18 @@ func TestValueValidOperations(t *testing.T) {
 			name:  "calling array on array value succeeds",
 			input: "[1,2,3]",
 			operation: func(v *jsonlite.Value) {
-				_ = v.Array()
+				for range v.Array {
+					break
+				}
 			},
 		},
 		{
 			name:  "calling object on object value succeeds",
 			input: `{"a":1}`,
 			operation: func(v *jsonlite.Value) {
-				_ = v.Object()
+				for range v.Object {
+					break
+				}
 			},
 		},
 		{
@@ -856,6 +1039,27 @@ func TestValueValidOperations(t *testing.T) {
 			input: "false",
 			operation: func(v *jsonlite.Value) {
 				_ = v.String() // Should return "false", not panic
+			},
+		},
+		{
+			name:  "calling index on array value succeeds",
+			input: "[1,2,3]",
+			operation: func(v *jsonlite.Value) {
+				_ = v.Index(0)
+			},
+		},
+		{
+			name:  "calling lookup_path on object value succeeds",
+			input: `{"a":{"b":1}}`,
+			operation: func(v *jsonlite.Value) {
+				_ = v.LookupPath("a", "b")
+			},
+		},
+		{
+			name:  "calling lookup_path with empty path succeeds",
+			input: `{"a":1}`,
+			operation: func(v *jsonlite.Value) {
+				_ = v.LookupPath()
 			},
 		},
 	}
@@ -1281,6 +1485,74 @@ func BenchmarkAppendVsCompact(b *testing.B) {
 				result := val.Compact(nil)
 				if len(result) == 0 {
 					b.Fatal("Compact returned empty result")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkValueObject(b *testing.B) {
+	benchmarks := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "small_object",
+			input: `{"a":1,"b":2,"c":3}`,
+		},
+		{
+			name:  "medium_object",
+			input: `{"name":"John","age":30,"email":"john@example.com","city":"NYC","country":"USA","active":true,"score":95.5,"tags":["tag1","tag2"],"nested":{"x":1,"y":2}}`,
+		},
+		{
+			name:  "large_object",
+			input: `{"field1":"value1","field2":"value2","field3":"value3","field4":"value4","field5":"value5","field6":"value6","field7":"value7","field8":"value8","field9":"value9","field10":"value10","field11":"value11","field12":"value12","field13":"value13","field14":"value14","field15":"value15","field16":"value16","field17":"value17","field18":"value18","field19":"value19","field20":"value20"}`,
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			val, err := jsonlite.Parse(bm.input)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				for _, _ = range val.Object {
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkValueArray(b *testing.B) {
+	benchmarks := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "small_array",
+			input: `[1,2,3]`,
+		},
+		{
+			name:  "medium_array",
+			input: `[1,2,3,4,5,6,7,8,9,10,"a","b","c","d","e",true,false,null,{"x":1},{"y":2}]`,
+		},
+		{
+			name:  "large_array",
+			input: `[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50]`,
+		},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			val, err := jsonlite.Parse(bm.input)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				for range val.Array {
 				}
 			}
 		})
