@@ -1302,3 +1302,215 @@ func BenchmarkValueArray(b *testing.B) {
 		})
 	}
 }
+
+func TestSize(t *testing.T) {
+	// Size of Value struct (16 bytes on 64-bit systems)
+	const valueSize = 16
+	// Size of field struct (32 bytes on 64-bit systems: 16 for string header + 16 for Value)
+	const fieldSize = 32
+
+	tests := []struct {
+		name     string
+		input    string
+		minSize  int64 // Minimum expected size
+		checkFn  func(t *testing.T, size int64, jsonLen int)
+	}{
+		{
+			name:    "null",
+			input:   "null",
+			minSize: valueSize + 4, // struct + "null"
+			checkFn: func(t *testing.T, size int64, jsonLen int) {
+				expected := int64(valueSize + jsonLen)
+				if size != expected {
+					t.Errorf("null: expected %d, got %d", expected, size)
+				}
+			},
+		},
+		{
+			name:    "true",
+			input:   "true",
+			minSize: valueSize + 4,
+			checkFn: func(t *testing.T, size int64, jsonLen int) {
+				expected := int64(valueSize + jsonLen)
+				if size != expected {
+					t.Errorf("true: expected %d, got %d", expected, size)
+				}
+			},
+		},
+		{
+			name:    "false",
+			input:   "false",
+			minSize: valueSize + 5,
+			checkFn: func(t *testing.T, size int64, jsonLen int) {
+				expected := int64(valueSize + jsonLen)
+				if size != expected {
+					t.Errorf("false: expected %d, got %d", expected, size)
+				}
+			},
+		},
+		{
+			name:    "number",
+			input:   "42",
+			minSize: valueSize + 2,
+			checkFn: func(t *testing.T, size int64, jsonLen int) {
+				expected := int64(valueSize + jsonLen)
+				if size != expected {
+					t.Errorf("number: expected %d, got %d", expected, size)
+				}
+			},
+		},
+		{
+			name:    "string",
+			input:   `"hello"`,
+			minSize: valueSize + 7,
+			checkFn: func(t *testing.T, size int64, jsonLen int) {
+				expected := int64(valueSize + jsonLen)
+				if size != expected {
+					t.Errorf("string: expected %d, got %d", expected, size)
+				}
+			},
+		},
+		{
+			name:    "empty_array",
+			input:   "[]",
+			minSize: valueSize + 2 + valueSize, // struct + "[]" + at least cache entry
+		},
+		{
+			name:    "array_with_primitives",
+			input:   "[1,2]",
+			minSize: valueSize + 5 + 3*valueSize, // struct + json + slice (cache + 2 elements)
+		},
+		{
+			name:    "empty_object",
+			input:   "{}",
+			minSize: valueSize + 2 + fieldSize, // struct + "{}" + at least cache entry
+		},
+		{
+			name:    "object_with_field",
+			input:   `{"a":1}`,
+			minSize: valueSize + 7 + 2*fieldSize, // struct + json + slice (cache + 1 field)
+		},
+		{
+			name:    "nested_array",
+			input:   "[[1]]",
+			minSize: valueSize + 5 + 2*valueSize + 2*valueSize, // outer + inner slices
+		},
+		{
+			name:    "nested_object",
+			input:   `{"a":{"b":1}}`,
+			minSize: valueSize + 13 + 2*fieldSize + 2*fieldSize, // outer + inner
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, err := jsonlite.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("parse %q: %v", tt.input, err)
+			}
+
+			size := val.Size()
+
+			// Check minimum size
+			if size < tt.minSize {
+				t.Errorf("Size() = %d, want at least %d", size, tt.minSize)
+			}
+
+			// Size should always include the JSON length
+			jsonLen := len(tt.input)
+			if size < int64(jsonLen) {
+				t.Errorf("Size() = %d, should be at least json length %d", size, jsonLen)
+			}
+
+			// Run custom check if provided
+			if tt.checkFn != nil {
+				tt.checkFn(t, size, jsonLen)
+			}
+		})
+	}
+}
+
+func TestSizeConsistency(t *testing.T) {
+	// Test that Size() is consistent across multiple calls
+	inputs := []string{
+		"null",
+		"42",
+		`"hello"`,
+		"[1,2,3]",
+		`{"a":1,"b":2}`,
+		`{"nested":{"array":[1,2,3]}}`,
+	}
+
+	for _, input := range inputs {
+		val, err := jsonlite.Parse(input)
+		if err != nil {
+			t.Fatalf("parse %q: %v", input, err)
+		}
+
+		size1 := val.Size()
+		size2 := val.Size()
+
+		if size1 != size2 {
+			t.Errorf("Size() not consistent for %q: got %d then %d", input, size1, size2)
+		}
+	}
+}
+
+func TestSizeIncludesJSON(t *testing.T) {
+	// Verify that Size() includes at least the JSON bytes
+	inputs := []string{
+		"null",
+		"true",
+		"false",
+		"12345",
+		`"a longer string value"`,
+		"[1,2,3,4,5,6,7,8,9,10]",
+		`{"key1":"value1","key2":"value2","key3":"value3"}`,
+	}
+
+	for _, input := range inputs {
+		val, err := jsonlite.Parse(input)
+		if err != nil {
+			t.Fatalf("parse %q: %v", input, err)
+		}
+
+		size := val.Size()
+		jsonLen := int64(len(val.JSON()))
+
+		if size < jsonLen {
+			t.Errorf("Size() = %d for %q, but JSON length is %d", size, input, jsonLen)
+		}
+	}
+}
+
+func TestSizeUnparsedObject(t *testing.T) {
+	// When using ParseMaxDepth, nested objects may be unparsed
+	// Size() should return the current memory usage (not trigger parsing)
+	input := `{"a":{"b":{"c":1}}}`
+
+	// Parse with depth 1 - nested objects will be unparsed
+	val, err := jsonlite.ParseMaxDepth(input, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get size before accessing nested object
+	sizeBefore := val.Size()
+	if sizeBefore <= 0 {
+		t.Errorf("Size() should be positive, got %d", sizeBefore)
+	}
+
+	// Access nested object (triggers parsing)
+	nested := val.Lookup("a")
+	if nested == nil {
+		t.Fatal("expected to find 'a'")
+	}
+	_ = nested.Lookup("b") // Trigger parsing of nested object
+
+	// Size may change after parsing nested objects
+	// This is expected behavior per the design
+	sizeAfter := val.Size()
+	if sizeAfter < sizeBefore {
+		t.Errorf("Size() decreased after parsing: %d -> %d", sizeBefore, sizeAfter)
+	}
+}
