@@ -1310,10 +1310,10 @@ func TestSize(t *testing.T) {
 	const fieldSize = 32
 
 	tests := []struct {
-		name     string
-		input    string
-		minSize  int64 // Minimum expected size
-		checkFn  func(t *testing.T, size int64, jsonLen int)
+		name    string
+		input   string
+		minSize int64 // Minimum expected size
+		checkFn func(t *testing.T, size int64, jsonLen int)
 	}{
 		{
 			name:    "null",

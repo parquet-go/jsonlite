@@ -422,32 +422,16 @@ func (v *Value) Compact(buf []byte) []byte {
 		if v.unparsed() {
 			parsed = v.parse()
 		}
-		buf = append(buf, '[')
-		var count int
-		for elem := range parsed.Array {
-			if count > 0 {
-				buf = append(buf, ',')
-			}
-			buf = elem.Compact(buf)
-			count++
-		}
-		return append(buf, ']')
+		return AppendArray(buf, parsed.Array, func(b []byte, elem *Value) []byte {
+			return elem.Compact(b)
+		})
 	default:
 		parsed := v
 		if v.unparsed() {
 			parsed = v.parse()
 		}
-		buf = append(buf, '{')
-		var count int
-		for k, v := range parsed.Object {
-			if count > 0 {
-				buf = append(buf, ',')
-			}
-			buf = AppendQuote(buf, k)
-			buf = append(buf, ':')
-			buf = v.Compact(buf)
-			count++
-		}
-		return append(buf, '}')
+		return AppendObject(buf, parsed.Object, func(b []byte, elem *Value) []byte {
+			return elem.Compact(b)
+		})
 	}
 }
