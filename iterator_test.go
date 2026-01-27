@@ -1372,10 +1372,12 @@ func TestIteratorInt(t *testing.T) {
 		{`"42"`, 42, false},
 		{`"-123"`, -123, false},
 		{`"0"`, 0, false},
-		{`null`, 0, false}, // null returns zero value (0)
-		{`3.14`, 0, true},  // float is not a valid int
-		{`true`, 0, true},  // bool is not valid
-		{`"abc"`, 0, true}, // non-numeric string
+		{`null`, 0, false},  // null returns zero value (0)
+		{`3.14`, 3, false},  // float is truncated to int
+		{`-3.99`, -3, false}, // negative float is truncated toward zero
+		{`1e2`, 100, false},  // scientific notation
+		{`true`, 0, true},   // bool is not valid
+		{`"abc"`, 0, true},  // non-numeric string
 	}
 
 	for _, tt := range tests {
@@ -1689,6 +1691,99 @@ func BenchmarkIteratorArray(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestIteratorObjectTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		kind  jsonlite.Kind
+	}{
+		{"string", `"hello"`, jsonlite.String},
+		{"number", `42`, jsonlite.Number},
+		{"array", `[1, 2, 3]`, jsonlite.Array},
+		{"true", `true`, jsonlite.True},
+		{"false", `false`, jsonlite.False},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			iter := jsonlite.Iterate(tt.input)
+			if !iter.Next() {
+				t.Fatal("expected at least one value")
+			}
+			if iter.Kind() != tt.kind {
+				t.Fatalf("expected %v, got %v", tt.kind, iter.Kind())
+			}
+
+			// Calling Object on a non-object should yield an error
+			var gotError error
+			var iterations int
+			for _, err := range iter.Object {
+				iterations++
+				if err != nil {
+					gotError = err
+				}
+			}
+
+			if iterations != 1 {
+				t.Errorf("expected exactly 1 iteration, got %d", iterations)
+			}
+			if gotError == nil {
+				t.Error("expected error, got nil")
+			} else if got := gotError.Error(); got != fmt.Sprintf("expected object, got %v", tt.kind) {
+				t.Errorf("unexpected error message: %q", got)
+			}
+		})
+	}
+}
+
+func TestIteratorArrayTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		kind  jsonlite.Kind
+	}{
+		{"string", `"hello"`, jsonlite.String},
+		{"number", `42`, jsonlite.Number},
+		{"object", `{"a": 1}`, jsonlite.Object},
+		{"true", `true`, jsonlite.True},
+		{"false", `false`, jsonlite.False},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			iter := jsonlite.Iterate(tt.input)
+			if !iter.Next() {
+				t.Fatal("expected at least one value")
+			}
+			if iter.Kind() != tt.kind {
+				t.Fatalf("expected %v, got %v", tt.kind, iter.Kind())
+			}
+
+			// Calling Array on a non-array should yield an error
+			var gotError error
+			var iterations int
+			for idx, err := range iter.Array {
+				iterations++
+				if idx != 0 {
+					t.Errorf("expected index 0, got %d", idx)
+				}
+				if err != nil {
+					gotError = err
+				}
+			}
+
+			if iterations != 1 {
+				t.Errorf("expected exactly 1 iteration, got %d", iterations)
+			}
+			if gotError == nil {
+				t.Error("expected error, got nil")
+			} else if got := gotError.Error(); got != fmt.Sprintf("expected array, got %v", tt.kind) {
+				t.Errorf("unexpected error message: %q", got)
 			}
 		})
 	}

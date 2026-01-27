@@ -91,29 +91,43 @@ func (v *Value) Len() int {
 }
 
 // Int returns the value as a signed 64-bit integer.
+// Floating point numbers are truncated to their integer part.
 // Panics if the value is not a number or if parsing fails.
 func (v *Value) Int() int64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Int called on non-number value")
 	}
-	i, err := strconv.ParseInt(v.json(), 10, 64)
+	s := v.json()
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err == nil {
+		return i
+	}
+	// Fall back to parsing as float and truncating
+	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		panic(err)
 	}
-	return i
+	return int64(f)
 }
 
 // Uint returns the value as an unsigned 64-bit integer.
+// Floating point numbers are truncated to their integer part.
 // Panics if the value is not a number or if parsing fails.
 func (v *Value) Uint() uint64 {
 	if v.Kind() != Number {
 		panic("jsonlite: Uint called on non-number value")
 	}
-	u, err := strconv.ParseUint(v.json(), 10, 64)
+	s := v.json()
+	u, err := strconv.ParseUint(s, 10, 64)
+	if err == nil {
+		return u
+	}
+	// Fall back to parsing as float and truncating
+	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		panic(err)
 	}
-	return u
+	return uint64(f)
 }
 
 // Float returns the value as a 64-bit floating point number.
