@@ -1,6 +1,7 @@
 package jsonlite
 
 import (
+	"encoding/base64"
 	"iter"
 	"strconv"
 	"time"
@@ -60,5 +61,12 @@ func AppendBool(b []byte, v bool) []byte { return strconv.AppendBool(b, v) }
 func AppendTime(b []byte, t time.Time) []byte {
 	b = append(b, '"')
 	b = t.AppendFormat(b, time.RFC3339Nano)
+	return append(b, '"')
+}
+
+// AppendBytes appends a byte slice as a base64-encoded JSON string to b.
+func AppendBytes(b []byte, data []byte) []byte {
+	b = append(b, '"')
+	b = base64.StdEncoding.AppendEncode(b, data)
 	return append(b, '"')
 }
