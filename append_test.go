@@ -291,3 +291,29 @@ func TestAppendTime(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendBytes(t *testing.T) {
+	tests := []struct {
+		input    []byte
+		expected string
+	}{
+		{nil, `""`},
+		{[]byte{}, `""`},
+		{[]byte("hello"), `"aGVsbG8="`},
+		{[]byte{0, 1, 2, 3}, `"AAECAw=="`},
+	}
+	for _, tt := range tests {
+		result := string(jsonlite.AppendBytes(nil, tt.input))
+		if result != tt.expected {
+			t.Errorf("AppendBytes(%v) = %s, expected %s", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestAppendBytesExistingBuffer(t *testing.T) {
+	buf := []byte("prefix:")
+	result := jsonlite.AppendBytes(buf, []byte("test"))
+	if string(result) != `prefix:"dGVzdA=="` {
+		t.Errorf("expected prefix:\"dGVzdA==\", got %s", result)
+	}
+}
