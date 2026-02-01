@@ -3,6 +3,7 @@ package jsonlite_test
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/parquet-go/jsonlite"
 )
@@ -271,5 +272,22 @@ func TestAppendBool(t *testing.T) {
 	}
 	if string(jsonlite.AppendBool(nil, false)) != "false" {
 		t.Error("AppendBool(false) should return false")
+	}
+}
+
+func TestAppendTime(t *testing.T) {
+	tests := []struct {
+		input    time.Time
+		expected string
+	}{
+		{time.Date(2024, 6, 15, 12, 30, 45, 0, time.UTC), `"2024-06-15T12:30:45Z"`},
+		{time.Date(2024, 6, 15, 12, 30, 45, 123456789, time.UTC), `"2024-06-15T12:30:45.123456789Z"`},
+		{time.Time{}, `"0001-01-01T00:00:00Z"`},
+	}
+	for _, tt := range tests {
+		result := string(jsonlite.AppendTime(nil, tt.input))
+		if result != tt.expected {
+			t.Errorf("AppendTime(%v) = %s, expected %s", tt.input, result, tt.expected)
+		}
 	}
 }
