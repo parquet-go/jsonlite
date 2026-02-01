@@ -3,6 +3,7 @@ package jsonlite
 import (
 	"iter"
 	"strconv"
+	"time"
 )
 
 // AppendFunc is a function that appends a value of type T to a byte slice.
@@ -54,3 +55,10 @@ func AppendFloat(b []byte, f float64) []byte { return strconv.AppendFloat(b, f, 
 
 // AppendBool appends a boolean as JSON to b.
 func AppendBool(b []byte, v bool) []byte { return strconv.AppendBool(b, v) }
+
+// AppendTime appends a time.Time as a JSON quoted RFC3339Nano string to b.
+func AppendTime(b []byte, t time.Time) []byte {
+	b = append(b, '"')
+	b = t.AppendFormat(b, time.RFC3339Nano)
+	return append(b, '"')
+}
