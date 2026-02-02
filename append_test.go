@@ -2,6 +2,7 @@ package jsonlite_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -315,5 +316,147 @@ func TestAppendBytesExistingBuffer(t *testing.T) {
 	result := jsonlite.AppendBytes(buf, []byte("test"))
 	if string(result) != `prefix:"dGVzdA=="` {
 		t.Errorf("expected prefix:\"dGVzdA==\", got %s", result)
+	}
+}
+
+func TestIndent(t *testing.T) {
+	// Test levels 0-16 (uses pre-allocated string)
+	for level := 0; level <= 16; level++ {
+		result := jsonlite.Indent(level)
+		expected := strings.Repeat(" ", 2*level)
+		if result != expected {
+			t.Errorf("Indent(%d) = %q, expected %q", level, result, expected)
+		}
+	}
+
+	// Test level 17+ (uses strings.Repeat)
+	for level := 17; level <= 20; level++ {
+		result := jsonlite.Indent(level)
+		expected := strings.Repeat(" ", 2*level)
+		if result != expected {
+			t.Errorf("Indent(%d) = %q, expected %q", level, result, expected)
+		}
+	}
+}
+
+func TestAppendIndentArrayEmpty(t *testing.T) {
+	seq := func(yield func(int64) bool) {}
+	result := jsonlite.AppendIndentArray(nil, seq, jsonlite.AppendInt, 0, jsonlite.Indent)
+	if string(result) != "[]" {
+		t.Errorf("expected [], got %s", result)
+	}
+}
+
+func TestAppendIndentArraySingle(t *testing.T) {
+	seq := slices.Values([]int64{42})
+	result := jsonlite.AppendIndentArray(nil, seq, jsonlite.AppendInt, 0, jsonlite.Indent)
+	expected := "[\n  42\n]"
+	if string(result) != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestAppendIndentArrayMultiple(t *testing.T) {
+	seq := slices.Values([]int64{1, 2, 3})
+	result := jsonlite.AppendIndentArray(nil, seq, jsonlite.AppendInt, 0, jsonlite.Indent)
+	expected := "[\n  1,\n  2,\n  3\n]"
+	if string(result) != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestAppendIndentArrayNested(t *testing.T) {
+	appendInner := func(b []byte, nums []int64) []byte {
+		return jsonlite.AppendIndentArray(b, slices.Values(nums), jsonlite.AppendInt, 1, jsonlite.Indent)
+	}
+	outer := slices.Values([][]int64{{1, 2}, {3, 4}})
+	result := jsonlite.AppendIndentArray(nil, outer, appendInner, 0, jsonlite.Indent)
+	expected := "[\n  [\n    1,\n    2\n  ],\n  [\n    3,\n    4\n  ]\n]"
+	if string(result) != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestAppendIndentObjectEmpty(t *testing.T) {
+	seq := func(yield func(string, int64) bool) {}
+	result := jsonlite.AppendIndentObject(nil, seq, jsonlite.AppendInt, 0, jsonlite.Indent)
+	if string(result) != "{}" {
+		t.Errorf("expected {}, got %s", result)
+	}
+}
+
+func TestAppendIndentObjectSingle(t *testing.T) {
+	seq := func(yield func(string, int64) bool) {
+		yield("key", 42)
+	}
+	result := jsonlite.AppendIndentObject(nil, seq, jsonlite.AppendInt, 0, jsonlite.Indent)
+	expected := "{\n  \"key\": 42\n}"
+	if string(result) != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestAppendIndentObjectMultiple(t *testing.T) {
+	seq := func(yield func(string, int64) bool) {
+		yield("a", 1)
+		yield("b", 2)
+	}
+	result := jsonlite.AppendIndentObject(nil, seq, jsonlite.AppendInt, 0, jsonlite.Indent)
+	expected := "{\n  \"a\": 1,\n  \"b\": 2\n}"
+	if string(result) != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestAppendIndentObjectNested(t *testing.T) {
+	appendInner := func(b []byte, v int64) []byte {
+		return jsonlite.AppendIndentObject(b, func(yield func(string, int64) bool) {
+			yield("inner", v)
+		}, jsonlite.AppendInt, 1, jsonlite.Indent)
+	}
+	result := jsonlite.AppendIndentObject(nil, func(yield func(string, int64) bool) {
+		yield("outer", 42)
+	}, appendInner, 0, jsonlite.Indent)
+	expected := "{\n  \"outer\": {\n    \"inner\": 42\n  }\n}"
+	if string(result) != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+}
+
+func TestAppendIndentRoundTrip(t *testing.T) {
+	// Test array round trip
+	arrayResult := jsonlite.AppendIndentArray(nil, slices.Values([]int64{1, 2, 3}), jsonlite.AppendInt, 0, jsonlite.Indent)
+	val, err := jsonlite.Parse(string(arrayResult))
+	if err != nil {
+		t.Fatalf("parse error for array: %v", err)
+	}
+	if val.Kind() != jsonlite.Array {
+		t.Fatalf("expected array, got %v", val.Kind())
+	}
+	var parsed []int64
+	for elem := range val.Array {
+		parsed = append(parsed, elem.Int())
+	}
+	if !slices.Equal([]int64{1, 2, 3}, parsed) {
+		t.Errorf("array round-trip failed: %v", parsed)
+	}
+
+	// Test object round trip
+	objectResult := jsonlite.AppendIndentObject(nil, func(yield func(string, string) bool) {
+		yield("hello", "world")
+		yield("foo", "bar")
+	}, jsonlite.AppendQuote, 0, jsonlite.Indent)
+	val, err = jsonlite.Parse(string(objectResult))
+	if err != nil {
+		t.Fatalf("parse error for object: %v", err)
+	}
+	if val.Kind() != jsonlite.Object {
+		t.Fatalf("expected object, got %v", val.Kind())
+	}
+	if val.Lookup("hello").String() != "world" {
+		t.Errorf("expected world, got %s", val.Lookup("hello").String())
+	}
+	if val.Lookup("foo").String() != "bar" {
+		t.Errorf("expected bar, got %s", val.Lookup("foo").String())
 	}
 }
