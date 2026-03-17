@@ -201,6 +201,180 @@ func TestParseError(t *testing.T) {
 	}
 }
 
+func TestParseSeq(t *testing.T) {
+	t.Run("empty input", func(t *testing.T) {
+		count := 0
+		for v, err := range jsonlite.ParseSeq("") {
+			_ = v
+			_ = err
+			count++
+		}
+		if count != 0 {
+			t.Errorf("expected 0 values, got %d", count)
+		}
+	})
+
+	t.Run("whitespace only", func(t *testing.T) {
+		count := 0
+		for v, err := range jsonlite.ParseSeq("   \t\n  ") {
+			_ = v
+			_ = err
+			count++
+		}
+		if count != 0 {
+			t.Errorf("expected 0 values, got %d", count)
+		}
+	})
+
+	t.Run("empty array", func(t *testing.T) {
+		count := 0
+		for v, err := range jsonlite.ParseSeq("[]") {
+			_ = v
+			if err != nil {
+				t.Fatal(err)
+			}
+			count++
+		}
+		if count != 0 {
+			t.Errorf("expected 0 values, got %d", count)
+		}
+	})
+
+	t.Run("array with elements", func(t *testing.T) {
+		var values []int64
+		for v, err := range jsonlite.ParseSeq("[1, 2, 3]") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, v.Int())
+		}
+		if len(values) != 3 {
+			t.Fatalf("expected 3 values, got %d", len(values))
+		}
+		for i, expected := range []int64{1, 2, 3} {
+			if values[i] != expected {
+				t.Errorf("values[%d] = %d, want %d", i, values[i], expected)
+			}
+		}
+	})
+
+	t.Run("json lines", func(t *testing.T) {
+		input := "{\"a\":1}\n{\"b\":2}\n{\"c\":3}"
+		var values []*jsonlite.Value
+		for v, err := range jsonlite.ParseSeq(input) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, v)
+		}
+		if len(values) != 3 {
+			t.Fatalf("expected 3 values, got %d", len(values))
+		}
+		if v := values[0].Lookup("a"); v == nil || v.Int() != 1 {
+			t.Errorf("values[0]: expected {a:1}")
+		}
+		if v := values[1].Lookup("b"); v == nil || v.Int() != 2 {
+			t.Errorf("values[1]: expected {b:2}")
+		}
+		if v := values[2].Lookup("c"); v == nil || v.Int() != 3 {
+			t.Errorf("values[2]: expected {c:3}")
+		}
+	})
+
+	t.Run("mixed types json lines", func(t *testing.T) {
+		input := "42\n\"hello\"\ntrue\nnull"
+		var kinds []jsonlite.Kind
+		for v, err := range jsonlite.ParseSeq(input) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			kinds = append(kinds, v.Kind())
+		}
+		expected := []jsonlite.Kind{jsonlite.Number, jsonlite.String, jsonlite.True, jsonlite.Null}
+		if len(kinds) != len(expected) {
+			t.Fatalf("expected %d values, got %d", len(expected), len(kinds))
+		}
+		for i := range expected {
+			if kinds[i] != expected[i] {
+				t.Errorf("kinds[%d] = %v, want %v", i, kinds[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("trailing whitespace", func(t *testing.T) {
+		var values []int64
+		for v, err := range jsonlite.ParseSeq("1\n2\n3\n  \n") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, v.Int())
+		}
+		if len(values) != 3 {
+			t.Fatalf("expected 3 values, got %d", len(values))
+		}
+	})
+
+	t.Run("malformed input", func(t *testing.T) {
+		var gotErr bool
+		for _, err := range jsonlite.ParseSeq("{invalid}") {
+			if err != nil {
+				gotErr = true
+				break
+			}
+		}
+		if !gotErr {
+			t.Error("expected an error for malformed input")
+		}
+	})
+
+	t.Run("malformed array", func(t *testing.T) {
+		var gotErr bool
+		for _, err := range jsonlite.ParseSeq("[1, 2,]") {
+			if err != nil {
+				gotErr = true
+				break
+			}
+		}
+		if !gotErr {
+			t.Error("expected an error for malformed array")
+		}
+	})
+
+	t.Run("early break", func(t *testing.T) {
+		count := 0
+		for v, err := range jsonlite.ParseSeq("[1, 2, 3, 4, 5]") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = v
+			count++
+			if count == 2 {
+				break
+			}
+		}
+		if count != 2 {
+			t.Errorf("expected 2 values before break, got %d", count)
+		}
+	})
+
+	t.Run("early break json lines", func(t *testing.T) {
+		count := 0
+		for v, err := range jsonlite.ParseSeq("1\n2\n3\n4\n5") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = v
+			count++
+			if count == 2 {
+				break
+			}
+		}
+		if count != 2 {
+			t.Errorf("expected 2 values before break, got %d", count)
+		}
+	})
+}
+
 func BenchmarkTokenize(b *testing.B) {
 	benchmarks := []struct {
 		name  string
