@@ -1788,3 +1788,17 @@ func TestIteratorArrayTypeMismatch(t *testing.T) {
 		})
 	}
 }
+
+func TestIteratorResetClearsState(t *testing.T) {
+	it := jsonlite.Iterate(`{"event":"bounce"}`)
+	it.Next() // kind=Object, pushes 'o' onto state — do NOT consume the object
+
+	it.Reset(`[{"event":"click"}]`)
+	ok := it.Next() // must be true; stale state=['o'] would misinterpret '[' without the fix
+	if !ok {
+		t.Fatal("Next() returned false after Reset; state was not cleared")
+	}
+	if it.Kind() != jsonlite.Array {
+		t.Fatalf("expected Array kind, got %v", it.Kind())
+	}
+}

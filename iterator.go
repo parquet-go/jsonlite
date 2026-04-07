@@ -40,6 +40,7 @@ func (it *Iterator) Reset(json string) {
 	it.kind = 0
 	it.key = ""
 	it.err = nil
+	it.state = it.bytes[:0]
 	it.consumed = false
 }
 
