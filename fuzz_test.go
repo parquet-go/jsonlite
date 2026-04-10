@@ -419,6 +419,62 @@ func FuzzIteratorObjectArray(f *testing.F) {
 	})
 }
 
+func FuzzQuote(f *testing.F) {
+	// Seed corpus: inputs that exercise ASCII, escapes, valid UTF-8,
+	// and invalid UTF-8 fragments. The \xc2\x9c case is the regression
+	// seed for the UTF-8 escaping bug that double-encoded U+009C as two
+	// codepoints (\u00c2\u009c).
+	seeds := []string{
+		"",
+		"hello",
+		`say "hello"`,
+		`path\to\file`,
+		"\x00\x01\x1f",
+		"\b\f\n\r\t",
+		"café",
+		"日本語",
+		"hello 🌍",
+		"\u009c",         // U+009C in UTF-8 (0xc2 0x9c) — the regression case
+		"\xc2\x9c",       // same bytes spelled out
+		"\x9c",           // lone 0x9c — invalid UTF-8
+		"\xc2",           // lone 0xc2 — invalid UTF-8 lead byte
+		"mixed\x80high\xffbytes",
+		"prefix\"with\\escapes\xc2\x9cand UTF-8",
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		// AppendQuote must never panic and must produce output that
+		// round-trips through Unquote to recover the original input.
+		quoted := jsonlite.Quote(s)
+
+		if !jsonlite.Valid(quoted) {
+			t.Fatalf("Quote(%q) = %q is not valid JSON", s, quoted)
+		}
+
+		unquoted, err := jsonlite.Unquote(quoted)
+		if err != nil {
+			t.Fatalf("Unquote(Quote(%q)) = %q: %v", s, quoted, err)
+		}
+		if unquoted != s {
+			t.Fatalf("round-trip mismatch: input=%q quoted=%q unquoted=%q", s, quoted, unquoted)
+		}
+
+		// AppendQuote with a non-empty prefix must behave the same as
+		// Quote (i.e. only append to the buffer, never rewrite it).
+		prefix := []byte("prefix:")
+		got := jsonlite.AppendQuote(prefix, s)
+		if string(got[:len(prefix)]) != "prefix:" {
+			t.Fatalf("AppendQuote overwrote prefix: %q", got)
+		}
+		if string(got[len(prefix):]) != quoted {
+			t.Fatalf("AppendQuote produced %q, Quote produced %q", string(got[len(prefix):]), quoted)
+		}
+	})
+}
+
 func FuzzTokenizer(f *testing.F) {
 	// Add seed corpus
 	seeds := []string{

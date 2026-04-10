@@ -84,12 +84,32 @@ func TestQuote(t *testing.T) {
 		{
 			name:  "non-ASCII byte",
 			input: "hello\x80world",
-			want:  `"hello\u0080world"`,
+			want:  "\"hello\x80world\"", // high bytes pass through unchanged
 		},
 		{
 			name:  "UTF-8 multibyte",
 			input: "café",
-			want:  `"caf\u00c3\u00a9"`, // UTF-8 bytes of é are 0xC3 0xA9
+			want:  `"café"`, // valid UTF-8 is preserved
+		},
+		{
+			name:  "UTF-8 U+009C",
+			input: "\u009c", // 0xC2 0x9C — the regression case
+			want:  "\"\u009c\"",
+		},
+		{
+			name:  "UTF-8 Japanese",
+			input: "日本語",
+			want:  `"日本語"`,
+		},
+		{
+			name:  "UTF-8 emoji",
+			input: "hello 🌍",
+			want:  `"hello 🌍"`,
+		},
+		{
+			name:  "invalid UTF-8 byte",
+			input: "\x9c", // lone 0x9C — not valid UTF-8, preserved as-is
+			want:  "\"\x9c\"",
 		},
 		{
 			name:  "all escape types",
@@ -248,12 +268,21 @@ func TestEscapeIndex(t *testing.T) {
 		{"hello\x1f", 5},
 		{"\x7f", -1}, // DEL (0x7F) doesn't need escaping in JSON
 		{"hello\x7f", -1},
-		{"\x80", 0},
-		{"hello\x80", 5},
+		{"\x80", -1}, // high bytes pass through (valid UTF-8 content)
+		{"hello\x80", -1},
+		{"café", -1},                     // valid UTF-8 multibyte
+		{"\xc2\x9c", -1},                  // U+009C encoded as UTF-8
+		{"日本語", -1},                      // Japanese characters
+		{"prefix\xc2\x9csuffix", -1},
+		{"needs\"quoting\xc2\x9c", 5},    // quote escape wins over high byte
+		{"\xc2\x9cneeds\\escape", 7},     // backslash after high bytes
 		// Test with string longer than 8 bytes to exercise SIMD path
 		{"abcdefghijklmnop", -1},
 		{"abcdefgh\"jklmnop", 8},
 		{"abcdefghijklmno\"", 15},
+		{"abcdefgh\xc2\x9cjklmnop", -1}, // high bytes inside SIMD chunk
+		{"\xc2\x9c\xc2\x9c\xc2\x9c\xc2\x9c", -1},
+		{"abcdefgh\xc2\x9c\"jklmno", 10}, // escape after high bytes in SIMD
 	}
 
 	for _, tt := range tests {
