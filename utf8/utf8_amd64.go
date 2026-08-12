@@ -160,7 +160,7 @@ func validAVX512(s string) bool {
 	sub3 := archsimd.BroadcastUint8x64(0xF0 - 0x80)
 	zero16x32 := archsimd.BroadcastUint16x32(0)
 
-	i := 0
+	var i int
 	// Chunked ASCII fast path: OR-accumulate 512-byte chunks with no
 	// per-block compare, movemask, or branch — the scalar stdlib loop beats
 	// a naive per-block vector skip precisely because it keeps branches and
@@ -168,24 +168,28 @@ func validAVX512(s string) bool {
 	// chunks are skipped wholesale; chunks containing non-ASCII bytes run
 	// the checker on every block unconditionally (the checker is a no-op on
 	// ASCII blocks), which keeps the inner loop branch-free too.
-	for ; i+512 <= n; i += 512 {
-		acc := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+64:])))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+128:])))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+192:])))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+256:])))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+320:])))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+384:])))
-		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+448:])))
+	// Viewing the input as [8][64]byte chunks gives every load a statically
+	// bounded index, eliminating the per-load slice bounds checks.
+	chunks := unsafe.Slice((*[8][64]byte)(unsafe.Pointer(unsafe.StringData(s))), n/512)
+	for ci := range chunks {
+		c := &chunks[ci]
+		acc := archsimd.LoadUint8x64(&c[0])
+		acc = acc.Or(archsimd.LoadUint8x64(&c[1]))
+		acc = acc.Or(archsimd.LoadUint8x64(&c[2]))
+		acc = acc.Or(archsimd.LoadUint8x64(&c[3]))
+		acc = acc.Or(archsimd.LoadUint8x64(&c[4]))
+		acc = acc.Or(archsimd.LoadUint8x64(&c[5]))
+		acc = acc.Or(archsimd.LoadUint8x64(&c[6]))
+		acc = acc.Or(archsimd.LoadUint8x64(&c[7]))
 		if acc.GreaterEqual(highBit).ToBits() == 0 {
 			// ASCII chunk: only a pending truncated sequence can be an error.
 			errv = errv.Or(prevIncomplete)
 			prevIncomplete = zero
-			prev = archsimd.LoadUint8x64((*[64]byte)(buf[i+448:]))
+			prev = archsimd.LoadUint8x64(&c[7])
 			continue
 		}
-		for k := 0; k < 512; k += 64 {
-			z := archsimd.LoadUint8x64((*[64]byte)(buf[i+k:]))
+		for k := range c {
+			z := archsimd.LoadUint8x64(&c[k])
 			prev1 := prev.ConcatPermute(z, indices1)
 			hi1 := prev1.AsUint16x32().ShiftAllRightConcat(4, zero16x32).AsUint8x64().And(lowNibble)
 			lo1 := prev1.And(lowNibble)
@@ -201,6 +205,7 @@ func validAVX512(s string) bool {
 			prev = z
 		}
 	}
+	i = len(chunks) * 512
 	// Remainder blocks after the last full chunk.
 	for ; i+64 <= n; i += 64 {
 		z := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
@@ -293,25 +298,29 @@ func validAVX2(s string) bool {
 	sub3 := archsimd.BroadcastUint8x32(0xF0 - 0x80)
 	nibbleMul := archsimd.BroadcastUint16x16(0x1000)
 
-	i := 0
+	var i int
 	// Chunked ASCII fast path; see validAVX512 for rationale.
-	for ; i+256 <= n; i += 256 {
-		acc := archsimd.LoadUint8x32((*[32]byte)(buf[i:]))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+32:])))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+64:])))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+96:])))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+128:])))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+160:])))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+192:])))
-		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+224:])))
+	// As in validAVX512, the [8][32]byte view eliminates per-load bounds
+	// checks.
+	chunks := unsafe.Slice((*[8][32]byte)(unsafe.Pointer(unsafe.StringData(s))), n/256)
+	for ci := range chunks {
+		c := &chunks[ci]
+		acc := archsimd.LoadUint8x32(&c[0])
+		acc = acc.Or(archsimd.LoadUint8x32(&c[1]))
+		acc = acc.Or(archsimd.LoadUint8x32(&c[2]))
+		acc = acc.Or(archsimd.LoadUint8x32(&c[3]))
+		acc = acc.Or(archsimd.LoadUint8x32(&c[4]))
+		acc = acc.Or(archsimd.LoadUint8x32(&c[5]))
+		acc = acc.Or(archsimd.LoadUint8x32(&c[6]))
+		acc = acc.Or(archsimd.LoadUint8x32(&c[7]))
 		if acc.AsInt8x32().Less(zeroInt).ToBits() == 0 {
 			errv = errv.Or(prevIncomplete)
 			prevIncomplete = zero
-			prev = archsimd.LoadUint8x32((*[32]byte)(buf[i+224:]))
+			prev = archsimd.LoadUint8x32(&c[7])
 			continue
 		}
-		for k := 0; k < 256; k += 32 {
-			z := archsimd.LoadUint8x32((*[32]byte)(buf[i+k:]))
+		for k := range c {
+			z := archsimd.LoadUint8x32(&c[k])
 			pSwap := prev.AsUint32x8().Permute(laneSwap).AsUint8x32()
 			zSwap := z.AsUint32x8().Permute(laneSwap).AsUint8x32()
 			w := pSwap.And(laneSel).Or(zSwap.AndNot(laneSel))
@@ -330,6 +339,7 @@ func validAVX2(s string) bool {
 			prev = z
 		}
 	}
+	i = len(chunks) * 256
 	// Remainder blocks after the last full chunk.
 	for ; i+32 <= n; i += 32 {
 		z := archsimd.LoadUint8x32((*[32]byte)(buf[i:]))
