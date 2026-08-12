@@ -8,6 +8,12 @@ import (
 	"unsafe"
 )
 
+// valid is selected at startup based on CPU support. It is a variable
+// (rather than a build-tag-selected function, as in the fallback build)
+// because the choice between the AVX-512 and AVX2 kernels can only be made
+// at run time.
+var valid func(string) bool = stdutf8.ValidString
+
 func init() {
 	switch {
 	// The AVX-512 validator needs VBMI for the cross-lane byte permute
