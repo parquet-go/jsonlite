@@ -6,6 +6,8 @@ import (
 	"simd/archsimd"
 	stdutf8 "unicode/utf8"
 	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 // valid dispatches on CPU support at each call. The feature checks are
@@ -170,7 +172,7 @@ func validAVX512(s string) bool {
 	// ASCII blocks), which keeps the inner loop branch-free too.
 	// Viewing the input as [8][64]byte chunks gives every load a statically
 	// bounded index, eliminating the per-load slice bounds checks.
-	chunks := unsafe.Slice((*[8][64]byte)(unsafe.Pointer(unsafe.StringData(s))), n/512)
+	chunks := unsafecast.Slice[[8][64]byte](buf)
 	for ci := range chunks {
 		c := &chunks[ci]
 		acc := archsimd.LoadUint8x64(&c[0])
@@ -302,7 +304,7 @@ func validAVX2(s string) bool {
 	// Chunked ASCII fast path; see validAVX512 for rationale.
 	// As in validAVX512, the [8][32]byte view eliminates per-load bounds
 	// checks.
-	chunks := unsafe.Slice((*[8][32]byte)(unsafe.Pointer(unsafe.StringData(s))), n/256)
+	chunks := unsafecast.Slice[[8][32]byte](buf)
 	for ci := range chunks {
 		c := &chunks[ci]
 		acc := archsimd.LoadUint8x32(&c[0])
