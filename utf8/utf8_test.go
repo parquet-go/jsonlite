@@ -36,11 +36,23 @@ func boundarySequences() []string {
 
 // TestValidOracle places every boundary sequence at every offset relative to
 // the 16/64-byte block structure, embedded in ASCII padding, and compares
-// against unicode/utf8.
+// against unicode/utf8. Offsets beyond 256 and 512 place the sequence in the
+// remainder region past the vectorized validators' last full ASCII chunk,
+// and near the chunk boundaries themselves.
 func TestValidOracle(t *testing.T) {
-	pad := strings.Repeat("a", 200)
+	pad := strings.Repeat("a", 700)
+	offsets := make([]int, 0, 128)
+	for off := 0; off < 70; off++ {
+		offsets = append(offsets, off)
+	}
+	for _, boundary := range []int{256, 512} {
+		for off := boundary - 8; off < boundary+8; off++ {
+			offsets = append(offsets, off)
+		}
+	}
+	offsets = append(offsets, 300, 540, 570, 600)
 	for _, seq := range boundarySequences() {
-		for off := 0; off < 70; off++ {
+		for _, off := range offsets {
 			for _, tailLen := range []int{0, 1, 5, 70} {
 				s := pad[:off] + seq + pad[:tailLen]
 				got := Valid(s)

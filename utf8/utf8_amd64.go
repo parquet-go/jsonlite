@@ -208,9 +208,11 @@ func validAVX512(s string) bool {
 		}
 	}
 	i = len(chunks) * 512
-	// Remainder blocks after the last full chunk.
-	for ; i+64 <= n; i += 64 {
-		z := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
+	// Remainder blocks after the last full chunk, as a [64]byte view for
+	// the same bounds-check elimination as the chunk loop.
+	rest := unsafecast.Slice[[64]byte](buf[i:])
+	for ri := range rest {
+		z := archsimd.LoadUint8x64(&rest[ri])
 		if z.GreaterEqual(highBit).ToBits() == 0 {
 			errv = errv.Or(prevIncomplete)
 			prevIncomplete = zero
@@ -231,6 +233,7 @@ func validAVX512(s string) bool {
 		prevIncomplete = z.SubSaturated(maxVal)
 		prev = z
 	}
+	i += len(rest) * 64
 
 	if errv.NotEqual(zero).ToBits() != 0 {
 		return false
@@ -342,9 +345,10 @@ func validAVX2(s string) bool {
 		}
 	}
 	i = len(chunks) * 256
-	// Remainder blocks after the last full chunk.
-	for ; i+32 <= n; i += 32 {
-		z := archsimd.LoadUint8x32((*[32]byte)(buf[i:]))
+	// Remainder blocks after the last full chunk; see validAVX512.
+	rest := unsafecast.Slice[[32]byte](buf[i:])
+	for ri := range rest {
+		z := archsimd.LoadUint8x32(&rest[ri])
 		// High bit set anywhere means non-ASCII (signed less-than-zero).
 		if z.AsInt8x32().Less(zeroInt).ToBits() == 0 {
 			errv = errv.Or(prevIncomplete)
@@ -369,6 +373,7 @@ func validAVX2(s string) bool {
 		prevIncomplete = z.SubSaturated(maxVal)
 		prev = z
 	}
+	i += len(rest) * 32
 
 	if errv.NotEqual(zero).ToBits() != 0 {
 		return false

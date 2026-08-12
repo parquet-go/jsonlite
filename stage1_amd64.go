@@ -5,6 +5,8 @@ package jsonlite
 import (
 	"simd/archsimd"
 	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 // simdStage1 reports whether the vectorized structural indexer is available.
@@ -52,9 +54,11 @@ func structuralIndexAVX512(s string, index []uint32) ([]uint32, stage1Flags, err
 	high := archsimd.BroadcastUint8x64(0x80)
 
 	buf := unsafe.Slice(unsafe.StringData(s), len(s))
-	i := 0
-	for ; i+64 <= len(s); i += 64 {
-		v := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
+	// Ranging over a [64]byte view gives every load a statically bounded
+	// index, eliminating the per-block slice bounds check.
+	blocks := unsafecast.Slice[[64]byte](buf)
+	for bi := range blocks {
+		v := archsimd.LoadUint8x64(&blocks[bi])
 		var m blockMasks
 		m.bs = v.Equal(backslash).ToBits()
 		m.quote = v.Equal(quote).ToBits()
@@ -65,8 +69,9 @@ func structuralIndexAVX512(s string, index []uint32) ([]uint32, stage1Flags, err
 		m.structural = v.Equal(lbrace).ToBits() | v.Equal(rbrace).ToBits() |
 			v.Equal(lbracket).ToBits() | v.Equal(rbracket).ToBits() |
 			v.Equal(comma).ToBits() | v.Equal(colon).ToBits()
-		index = st.crunch(m, i, index)
+		index = st.crunch(m, bi*64, index)
 	}
+	i := len(blocks) * 64
 	if i < len(s) {
 		var b [64]byte
 		for j := range b {

@@ -5,6 +5,8 @@ import (
 	"math/bits"
 	"sync"
 	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 // This file implements a simdjson-style "stage 1" structural indexer
@@ -201,10 +203,11 @@ func structuralIndexPortable(s string, index []uint32) ([]uint32, stage1Flags, e
 	st.prevSep = 1
 
 	buf := unsafe.Slice(unsafe.StringData(s), len(s))
-	i := 0
-	for ; i+64 <= len(s); i += 64 {
-		index = st.crunch(classifyBlockPortable((*[64]byte)(buf[i:])), i, index)
+	blocks := unsafecast.Slice[[64]byte](buf)
+	for bi := range blocks {
+		index = st.crunch(classifyBlockPortable(&blocks[bi]), bi*64, index)
 	}
+	i := len(blocks) * 64
 	if i < len(s) {
 		var b [64]byte
 		for j := range b {
