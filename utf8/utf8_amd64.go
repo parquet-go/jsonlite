@@ -43,100 +43,64 @@ const (
 	carry        = tooShort | tooLong | twoConts
 )
 
-// The three nibble-lookup tables. VPSHUFB looks up within each 128-bit lane,
-// so the vector-width constants below replicate them per lane.
-var baseTblByte1High = [16]byte{
-	tooLong, tooLong, tooLong, tooLong, tooLong, tooLong, tooLong, tooLong,
-	twoConts, twoConts, twoConts, twoConts,
-	tooShort | overlong2,
-	tooShort,
-	tooShort | overlong3 | surrogate,
-	tooShort | tooLarge | tooLarge1000 | overlong4,
+// The three nibble-lookup tables of the lookup4 algorithm, encoding the
+// error classification bits defined above (e.g. 2 = tooLong, 128 = twoConts,
+// 131 = carry). The 16-entry table is repeated per 128-bit lane for VPSHUFB;
+// the AVX2 kernel loads the first two lanes.
+var tblByte1High = [64]byte{
+	2, 2, 2, 2, 2, 2, 2, 2, 128, 128, 128, 128, 33, 1, 21, 73,
+	2, 2, 2, 2, 2, 2, 2, 2, 128, 128, 128, 128, 33, 1, 21, 73,
+	2, 2, 2, 2, 2, 2, 2, 2, 128, 128, 128, 128, 33, 1, 21, 73,
+	2, 2, 2, 2, 2, 2, 2, 2, 128, 128, 128, 128, 33, 1, 21, 73,
 }
 
-var baseTblByte1Low = [16]byte{
-	carry | overlong3 | overlong2 | overlong4,
-	carry | overlong2,
-	carry, carry,
-	carry | tooLarge,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000 | surrogate,
-	carry | tooLarge | tooLarge1000,
-	carry | tooLarge | tooLarge1000,
+var tblByte1Low = [64]byte{
+	231, 163, 131, 131, 139, 203, 203, 203, 203, 203, 203, 203, 203, 219, 203, 203,
+	231, 163, 131, 131, 139, 203, 203, 203, 203, 203, 203, 203, 203, 219, 203, 203,
+	231, 163, 131, 131, 139, 203, 203, 203, 203, 203, 203, 203, 203, 219, 203, 203,
+	231, 163, 131, 131, 139, 203, 203, 203, 203, 203, 203, 203, 203, 219, 203, 203,
 }
 
-var baseTblByte2High = [16]byte{
-	tooShort, tooShort, tooShort, tooShort, tooShort, tooShort, tooShort, tooShort,
-	tooLong | overlong2 | twoConts | overlong3 | tooLarge1000 | overlong4,
-	tooLong | overlong2 | twoConts | overlong3 | tooLarge,
-	tooLong | overlong2 | twoConts | surrogate | tooLarge,
-	tooLong | overlong2 | twoConts | surrogate | tooLarge,
-	tooShort, tooShort, tooShort, tooShort,
-}
-
-var (
-	tblByte1High64 = repeatLanes64(baseTblByte1High)
-	tblByte1Low64  = repeatLanes64(baseTblByte1Low)
-	tblByte2High64 = repeatLanes64(baseTblByte2High)
-	tblByte1High32 = repeatLanes32(baseTblByte1High)
-	tblByte1Low32  = repeatLanes32(baseTblByte1Low)
-	tblByte2High32 = repeatLanes32(baseTblByte2High)
-)
-
-func repeatLanes64(t [16]byte) (r [64]byte) {
-	for i := range r {
-		r[i] = t[i%16]
-	}
-	return r
-}
-
-func repeatLanes32(t [16]byte) (r [32]byte) {
-	for i := range r {
-		r[i] = t[i%16]
-	}
-	return r
+var tblByte2High = [64]byte{
+	1, 1, 1, 1, 1, 1, 1, 1, 230, 174, 186, 186, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 230, 174, 186, 186, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 230, 174, 186, 186, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 230, 174, 186, 186, 1, 1, 1, 1,
 }
 
 // maxIncomplete flags multibyte sequences truncated at a block boundary:
 // bytes greater than these values in the last 3 positions start sequences
-// that cannot complete within the block.
-var maxIncomplete64 = func() (r [64]byte) {
-	for i := range r {
-		r[i] = 255
-	}
-	r[61] = 0xF0 - 1
-	r[62] = 0xE0 - 1
-	r[63] = 0xC0 - 1
-	return r
-}()
-
-var maxIncomplete32 = func() (r [32]byte) {
-	for i := range r {
-		r[i] = 255
-	}
-	r[29] = 0xF0 - 1
-	r[30] = 0xE0 - 1
-	r[31] = 0xC0 - 1
-	return r
-}()
+// that cannot complete within the block. The AVX2 kernel loads the last 32
+// bytes.
+var maxIncomplete = [64]byte{
+	255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+	255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+	255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+	255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0xF0 - 1, 0xE0 - 1, 0xC0 - 1,
+}
 
 // prevIndices[n-1] holds the VPERMI2B indices computing prev<n>: element i of
 // the result selects byte 64-n+i of concat(prevBlock, block).
-var prevIndices = func() (r [3][64]byte) {
-	for n := 1; n <= 3; n++ {
-		for i := range r[n-1] {
-			r[n-1][i] = byte(64 - n + i)
-		}
-	}
-	return r
-}()
+var prevIndices = [3][64]byte{
+	{
+		63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78,
+		79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94,
+		95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+		111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126,
+	},
+	{
+		62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77,
+		78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+		94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109,
+		110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125,
+	},
+	{
+		61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
+		77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92,
+		93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108,
+		109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124,
+	},
+}
 
 func validAVX512(s string) bool {
 	n := len(s)
@@ -149,10 +113,10 @@ func validAVX512(s string) bool {
 	errv := zero
 	prev := zero
 	prevIncomplete := zero
-	t1hi := archsimd.LoadUint8x64(&tblByte1High64)
-	t1lo := archsimd.LoadUint8x64(&tblByte1Low64)
-	t2hi := archsimd.LoadUint8x64(&tblByte2High64)
-	maxVal := archsimd.LoadUint8x64(&maxIncomplete64)
+	t1hi := archsimd.LoadUint8x64(&tblByte1High)
+	t1lo := archsimd.LoadUint8x64(&tblByte1Low)
+	t2hi := archsimd.LoadUint8x64(&tblByte2High)
+	maxVal := archsimd.LoadUint8x64(&maxIncomplete)
 	indices1 := archsimd.LoadUint8x64(&prevIndices[0])
 	indices2 := archsimd.LoadUint8x64(&prevIndices[1])
 	indices3 := archsimd.LoadUint8x64(&prevIndices[2])
@@ -261,13 +225,12 @@ func validAVX512(s string) bool {
 var laneSwap32 = [8]uint32{4, 5, 6, 7, 0, 1, 2, 3}
 
 // laneSelect32 selects the low lane from one vector and the high lane from
-// another: (a & laneSelect) | (b &^ laneSelect).
-var laneSelect32 = func() (r [32]byte) {
-	for i := 0; i < 16; i++ {
-		r[i] = 0xFF
-	}
-	return r
-}()
+// another: (a & laneSelect) | (b &^ laneSelect). Only the low lane is set;
+// the high lane is zero.
+var laneSelect32 = [32]byte{
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+}
 
 // validAVX2 is the 256-bit validator for CPUs without AVX-512. Differences
 // from validAVX512:
@@ -291,10 +254,10 @@ func validAVX2(s string) bool {
 	errv := zero
 	prev := zero
 	prevIncomplete := zero
-	t1hi := archsimd.LoadUint8x32(&tblByte1High32)
-	t1lo := archsimd.LoadUint8x32(&tblByte1Low32)
-	t2hi := archsimd.LoadUint8x32(&tblByte2High32)
-	maxVal := archsimd.LoadUint8x32(&maxIncomplete32)
+	t1hi := archsimd.LoadUint8x32((*[32]byte)(tblByte1High[0:32]))
+	t1lo := archsimd.LoadUint8x32((*[32]byte)(tblByte1Low[0:32]))
+	t2hi := archsimd.LoadUint8x32((*[32]byte)(tblByte2High[0:32]))
+	maxVal := archsimd.LoadUint8x32((*[32]byte)(maxIncomplete[32:64]))
 	laneSwap := archsimd.LoadUint32x8(&laneSwap32)
 	laneSel := archsimd.LoadUint8x32(&laneSelect32)
 	lowNibble := archsimd.BroadcastUint8x32(0x0F)
