@@ -10,15 +10,19 @@ import (
 	"github.com/parquet-go/bitpack/unsafecast"
 )
 
-// valid dispatches on CPU support at each call. The feature checks are
-// cheap branches on package variables, and will be erased by dead-code
-// elimination under GOAMD64=v3/v4 once https://go.dev/cl/813420 lands.
+// valid dispatches on input length and CPU support at each call. The feature
+// checks are cheap branches on package variables, and will be erased by
+// dead-code elimination under GOAMD64=v3/v4 once https://go.dev/cl/813420
+// lands. Inputs shorter than one vector block are validated by the scalar
+// stdlib; 32-63 byte inputs use the AVX2 kernel even on AVX-512 CPUs.
 func valid(s string) bool {
 	switch {
+	case len(s) < 32:
+		return stdutf8.ValidString(s)
 	// The AVX-512 validator needs VBMI for the cross-lane byte permute
 	// (VPERMI2B) used to compute the previous-byte vectors, and VBMI2 for
 	// the immediate-form funnel shift (VPSHRDW).
-	case archsimd.X86.AVX512() && archsimd.X86.AVX512VBMI() && archsimd.X86.AVX512VBMI2():
+	case len(s) >= 64 && archsimd.X86.AVX512() && archsimd.X86.AVX512VBMI() && archsimd.X86.AVX512VBMI2():
 		return validAVX512(s)
 	case archsimd.X86.AVX2():
 		return validAVX2(s)
@@ -102,11 +106,9 @@ var prevIndices = [3][64]byte{
 	},
 }
 
+// validAVX512 requires len(s) >= 64; valid routes shorter inputs elsewhere.
 func validAVX512(s string) bool {
 	n := len(s)
-	if n < 64 {
-		return stdutf8.ValidString(s)
-	}
 	buf := unsafe.Slice(unsafe.StringData(s), n)
 
 	zero := archsimd.BroadcastUint8x64(0)
@@ -242,11 +244,11 @@ var laneSelect32 = [32]byte{
 //     x>>4 per 16-bit lane): AVX2 has no immediate-form funnel shift, and
 //     the variable-count shift materializes its count through a legacy SSE
 //     MOVQ, which stalls when mixed with VEX code on some cores.
+//
+// validAVX2 requires len(s) >= 32; valid routes shorter inputs to the
+// scalar stdlib.
 func validAVX2(s string) bool {
 	n := len(s)
-	if n < 32 {
-		return stdutf8.ValidString(s)
-	}
 	buf := unsafe.Slice(unsafe.StringData(s), n)
 
 	zero := archsimd.BroadcastUint8x32(0)
