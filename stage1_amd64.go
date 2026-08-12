@@ -7,11 +7,19 @@ import (
 	"unsafe"
 )
 
-func init() {
+// simdStage1 reports whether the vectorized structural indexer is available.
+// The feature check is a cheap branch on a package variable, and will be
+// erased by dead-code elimination under GOAMD64=v4 once
+// https://go.dev/cl/813420 lands.
+func simdStage1() bool { return archsimd.X86.AVX512() }
+
+// structuralIndex scans s and appends emitted positions to index, returning
+// the index, document-level flags, and any string-level validation error.
+func structuralIndex(s string, index []uint32) ([]uint32, stage1Flags, error) {
 	if archsimd.X86.AVX512() {
-		structuralIndex = structuralIndexAVX512
-		simdStage1 = true
+		return structuralIndexAVX512(s, index)
 	}
+	return structuralIndexPortable(s, index)
 }
 
 // structuralIndexAVX512 is the vectorized structural indexer. The whole block

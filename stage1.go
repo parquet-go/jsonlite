@@ -194,17 +194,8 @@ func (st *stage1State) flags() stage1Flags {
 	return f
 }
 
-// simdStage1 reports whether the vectorized structural indexer is available;
-// it is set at init time on amd64 when built with GOEXPERIMENT=simd on a CPU
-// with AVX-512.
-var simdStage1 = false
-
-// structuralIndex scans s and appends emitted positions to index.
-// Returns the index, document-level flags, and any string-level validation
-// error. On amd64 with GOEXPERIMENT=simd and AVX-512 it is replaced at init
-// time by a vectorized implementation.
-var structuralIndex = structuralIndexPortable
-
+// structuralIndexPortable is the scalar structural indexer; structuralIndex
+// (defined per build) dispatches to it or to the vectorized implementation.
 func structuralIndexPortable(s string, index []uint32) ([]uint32, stage1Flags, error) {
 	var st stage1State
 	st.prevSep = 1

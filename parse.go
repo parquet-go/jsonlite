@@ -165,7 +165,7 @@ const indexedParseThreshold = 512
 // Depth is only decremented for objects, not arrays.
 // Returns an error if the JSON is malformed, empty, or not valid UTF-8.
 func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
-	if simdStage1 && len(data) >= indexedParseThreshold {
+	if simdStage1() && len(data) >= indexedParseThreshold {
 		return parseIndexed(data, maxDepth)
 	}
 	if !jsonliteutf8.Valid(data) {

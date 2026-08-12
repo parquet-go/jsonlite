@@ -8,21 +8,20 @@ import (
 	"unsafe"
 )
 
-// valid is selected at startup based on CPU support. It is a variable
-// (rather than a build-tag-selected function, as in the fallback build)
-// because the choice between the AVX-512 and AVX2 kernels can only be made
-// at run time.
-var valid func(string) bool = stdutf8.ValidString
-
-func init() {
+// valid dispatches on CPU support at each call. The feature checks are
+// cheap branches on package variables, and will be erased by dead-code
+// elimination under GOAMD64=v3/v4 once https://go.dev/cl/813420 lands.
+func valid(s string) bool {
 	switch {
 	// The AVX-512 validator needs VBMI for the cross-lane byte permute
 	// (VPERMI2B) used to compute the previous-byte vectors, and VBMI2 for
 	// the immediate-form funnel shift (VPSHRDW).
 	case archsimd.X86.AVX512() && archsimd.X86.AVX512VBMI() && archsimd.X86.AVX512VBMI2():
-		valid = validAVX512
+		return validAVX512(s)
 	case archsimd.X86.AVX2():
-		valid = validAVX2
+		return validAVX2(s)
+	default:
+		return stdutf8.ValidString(s)
 	}
 }
 
