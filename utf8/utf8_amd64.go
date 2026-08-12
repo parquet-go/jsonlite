@@ -156,10 +156,50 @@ func validAVX512(s string) bool {
 	zero16x32 := archsimd.BroadcastUint16x32(0)
 
 	i := 0
+	// Chunked ASCII fast path: OR-accumulate 512-byte chunks with no
+	// per-block compare, movemask, or branch — the scalar stdlib loop beats
+	// a naive per-block vector skip precisely because it keeps branches and
+	// vector-to-integer crossings off the per-iteration path. All-ASCII
+	// chunks are skipped wholesale; chunks containing non-ASCII bytes run
+	// the checker on every block unconditionally (the checker is a no-op on
+	// ASCII blocks), which keeps the inner loop branch-free too.
+	for ; i+512 <= n; i += 512 {
+		acc := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+64:])))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+128:])))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+192:])))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+256:])))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+320:])))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+384:])))
+		acc = acc.Or(archsimd.LoadUint8x64((*[64]byte)(buf[i+448:])))
+		if acc.GreaterEqual(highBit).ToBits() == 0 {
+			// ASCII chunk: only a pending truncated sequence can be an error.
+			errv = errv.Or(prevIncomplete)
+			prevIncomplete = zero
+			prev = archsimd.LoadUint8x64((*[64]byte)(buf[i+448:]))
+			continue
+		}
+		for k := 0; k < 512; k += 64 {
+			z := archsimd.LoadUint8x64((*[64]byte)(buf[i+k:]))
+			prev1 := prev.ConcatPermute(z, indices1)
+			hi1 := prev1.AsUint16x32().ShiftAllRightConcat(4, zero16x32).AsUint8x64().And(lowNibble)
+			lo1 := prev1.And(lowNibble)
+			hi2 := z.AsUint16x32().ShiftAllRightConcat(4, zero16x32).AsUint8x64().And(lowNibble)
+			sc := t1hi.PermuteOrZeroGrouped(hi1.AsInt8x64()).
+				And(t1lo.PermuteOrZeroGrouped(lo1.AsInt8x64())).
+				And(t2hi.PermuteOrZeroGrouped(hi2.AsInt8x64()))
+			prev2 := prev.ConcatPermute(z, indices2)
+			prev3 := prev.ConcatPermute(z, indices3)
+			must23 := prev2.SubSaturated(sub2).Or(prev3.SubSaturated(sub3))
+			errv = errv.Or(must23.And(highBit).Xor(sc))
+			prevIncomplete = z.SubSaturated(maxVal)
+			prev = z
+		}
+	}
+	// Remainder blocks after the last full chunk.
 	for ; i+64 <= n; i += 64 {
 		z := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
 		if z.GreaterEqual(highBit).ToBits() == 0 {
-			// ASCII block: only a pending truncated sequence can be an error.
 			errv = errv.Or(prevIncomplete)
 			prevIncomplete = zero
 			prev = z
@@ -249,6 +289,43 @@ func validAVX2(s string) bool {
 	nibbleMul := archsimd.BroadcastUint16x16(0x1000)
 
 	i := 0
+	// Chunked ASCII fast path; see validAVX512 for rationale.
+	for ; i+256 <= n; i += 256 {
+		acc := archsimd.LoadUint8x32((*[32]byte)(buf[i:]))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+32:])))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+64:])))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+96:])))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+128:])))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+160:])))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+192:])))
+		acc = acc.Or(archsimd.LoadUint8x32((*[32]byte)(buf[i+224:])))
+		if acc.AsInt8x32().Less(zeroInt).ToBits() == 0 {
+			errv = errv.Or(prevIncomplete)
+			prevIncomplete = zero
+			prev = archsimd.LoadUint8x32((*[32]byte)(buf[i+224:]))
+			continue
+		}
+		for k := 0; k < 256; k += 32 {
+			z := archsimd.LoadUint8x32((*[32]byte)(buf[i+k:]))
+			pSwap := prev.AsUint32x8().Permute(laneSwap).AsUint8x32()
+			zSwap := z.AsUint32x8().Permute(laneSwap).AsUint8x32()
+			w := pSwap.And(laneSel).Or(zSwap.AndNot(laneSel))
+			prev1 := z.ConcatShiftBytesRightGrouped(15, w)
+			hi1 := prev1.AsUint16x16().MulHigh(nibbleMul).AsUint8x32().And(lowNibble)
+			lo1 := prev1.And(lowNibble)
+			hi2 := z.AsUint16x16().MulHigh(nibbleMul).AsUint8x32().And(lowNibble)
+			sc := t1hi.PermuteOrZeroGrouped(hi1.AsInt8x32()).
+				And(t1lo.PermuteOrZeroGrouped(lo1.AsInt8x32())).
+				And(t2hi.PermuteOrZeroGrouped(hi2.AsInt8x32()))
+			prev2 := z.ConcatShiftBytesRightGrouped(14, w)
+			prev3 := z.ConcatShiftBytesRightGrouped(13, w)
+			must23 := prev2.SubSaturated(sub2).Or(prev3.SubSaturated(sub3))
+			errv = errv.Or(must23.And(highBit).Xor(sc))
+			prevIncomplete = z.SubSaturated(maxVal)
+			prev = z
+		}
+	}
+	// Remainder blocks after the last full chunk.
 	for ; i+32 <= n; i += 32 {
 		z := archsimd.LoadUint8x32((*[32]byte)(buf[i:]))
 		// High bit set anywhere means non-ASCII (signed less-than-zero).
@@ -258,12 +335,9 @@ func validAVX2(s string) bool {
 			prev = z
 			continue
 		}
-		// w = [prev.high, z.low]: per-lane VPALIGNR of (z, w) then yields
-		// the previous-byte vectors.
 		pSwap := prev.AsUint32x8().Permute(laneSwap).AsUint8x32()
 		zSwap := z.AsUint32x8().Permute(laneSwap).AsUint8x32()
 		w := pSwap.And(laneSel).Or(zSwap.AndNot(laneSel))
-
 		prev1 := z.ConcatShiftBytesRightGrouped(15, w)
 		hi1 := prev1.AsUint16x16().MulHigh(nibbleMul).AsUint8x32().And(lowNibble)
 		lo1 := prev1.And(lowNibble)
