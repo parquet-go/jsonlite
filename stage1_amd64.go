@@ -1,0 +1,77 @@
+//go:build goexperiment.simd && amd64
+
+package jsonlite
+
+import (
+	"simd/archsimd"
+	"unsafe"
+)
+
+func init() {
+	if archsimd.X86.AVX512() {
+		structuralIndex = structuralIndexAVX512
+		simdStage1 = true
+	}
+}
+
+// structuralIndexAVX512 is the vectorized structural indexer. The whole block
+// loop lives in one function so the compiler hoists the broadcast constants
+// out of the loop and keeps vectors in registers.
+//
+// Codegen notes, measured on Sapphire Rapids: keep this loop free of
+// constructs that emit legacy (non-VEX) SSE instructions — variable-count
+// vector shifts and per-block function calls that zero structs both do — as
+// each legacy SSE instruction executed with dirty ZMM upper state triggers a
+// microcode assist costing ~100ns. See the utf8 subpackage for the same
+// constraint.
+func structuralIndexAVX512(s string, index []uint32) ([]uint32, stage1Flags, error) {
+	var st stage1State
+	st.prevSep = 1
+
+	backslash := archsimd.BroadcastUint8x64('\\')
+	quote := archsimd.BroadcastUint8x64('"')
+	space := archsimd.BroadcastUint8x64(' ')
+	tab := archsimd.BroadcastUint8x64('\t')
+	newline := archsimd.BroadcastUint8x64('\n')
+	carriage := archsimd.BroadcastUint8x64('\r')
+	lbrace := archsimd.BroadcastUint8x64('{')
+	rbrace := archsimd.BroadcastUint8x64('}')
+	lbracket := archsimd.BroadcastUint8x64('[')
+	rbracket := archsimd.BroadcastUint8x64(']')
+	comma := archsimd.BroadcastUint8x64(',')
+	colon := archsimd.BroadcastUint8x64(':')
+	ctrl := archsimd.BroadcastUint8x64(0x20)
+	high := archsimd.BroadcastUint8x64(0x80)
+
+	buf := unsafe.Slice(unsafe.StringData(s), len(s))
+	i := 0
+	for ; i+64 <= len(s); i += 64 {
+		v := archsimd.LoadUint8x64((*[64]byte)(buf[i:]))
+		var m blockMasks
+		m.bs = v.Equal(backslash).ToBits()
+		m.quote = v.Equal(quote).ToBits()
+		m.ctrl = v.Less(ctrl).ToBits()
+		m.hi = v.GreaterEqual(high).ToBits()
+		m.ws = v.Equal(space).ToBits() | v.Equal(tab).ToBits() |
+			v.Equal(newline).ToBits() | v.Equal(carriage).ToBits()
+		m.structural = v.Equal(lbrace).ToBits() | v.Equal(rbrace).ToBits() |
+			v.Equal(lbracket).ToBits() | v.Equal(rbracket).ToBits() |
+			v.Equal(comma).ToBits() | v.Equal(colon).ToBits()
+		index = st.crunch(m, i, index)
+	}
+	if i < len(s) {
+		var b [64]byte
+		for j := range b {
+			b[j] = ' '
+		}
+		copy(b[:], s[i:])
+		index = st.crunch(classifyBlockPortable(&b), i, index)
+	}
+	if st.err != nil {
+		return index, st.flags(), st.err
+	}
+	if st.prevInString != 0 {
+		return index, st.flags(), errUnterminatedString
+	}
+	return index, st.flags(), nil
+}

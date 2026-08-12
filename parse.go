@@ -6,7 +6,10 @@ import (
 	"hash/maphash"
 	"iter"
 	"strings"
+	"sync"
 	"unsafe"
+
+	jsonliteutf8 "github.com/parquet-go/jsonlite/utf8"
 )
 
 const (
@@ -116,13 +119,61 @@ func nextToken(s string) (token, rest string, ok bool) {
 	}
 }
 
+// parser holds scratch stacks shared across the whole parse. Container
+// parsing appends to these stacks and copies completed containers into
+// exact-size allocations, avoiding a scratch allocation per container.
+type parser struct {
+	values []Value
+	fields []field
+	// high-water marks: the largest lengths reached during this parse,
+	// so putParser only clears entries that were actually written.
+	maxValues int
+	maxFields int
+}
+
+var parserPool = sync.Pool{
+	New: func() any {
+		return &parser{
+			values: make([]Value, 0, 64),
+			fields: make([]field, 0, 64),
+		}
+	},
+}
+
+func getParser() *parser { return parserPool.Get().(*parser) }
+
+func putParser(p *parser) {
+	// Clear only the entries written during this parse so pooled parsers
+	// don't retain pointers into previously parsed documents.
+	clear(p.values[:min(p.maxValues, cap(p.values))])
+	clear(p.fields[:min(p.maxFields, cap(p.fields))])
+	p.values = p.values[:0]
+	p.fields = p.fields[:0]
+	p.maxValues = 0
+	p.maxFields = 0
+	parserPool.Put(p)
+}
+
+// indexedParseThreshold is the document size above which Parse uses the
+// structural-index parser when the vectorized stage 1 is available. Below
+// this size the classic tokenizer is faster.
+const indexedParseThreshold = 512
+
 // ParseMaxDepth parses JSON data with a maximum nesting depth for objects.
 // Objects at maxDepth <= 0 are stored unparsed and will be lazily parsed
 // when accessed via Lookup(), Array(), or Object() methods.
 // Depth is only decremented for objects, not arrays.
-// Returns an error if the JSON is malformed or empty.
+// Returns an error if the JSON is malformed, empty, or not valid UTF-8.
 func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
-	v, rest, err := parseValue(data, max(0, maxDepth))
+	if simdStage1 && len(data) >= indexedParseThreshold {
+		return parseIndexed(data, maxDepth)
+	}
+	if !jsonliteutf8.Valid(data) {
+		return nil, errInvalidUTF8
+	}
+	p := getParser()
+	v, rest, err := parseValue(data, max(0, maxDepth), p)
+	putParser(p)
 	if err != nil {
 		return nil, err
 	}
@@ -140,10 +191,16 @@ func Parse(data string) (*Value, error) { return ParseMaxDepth(data, DefaultMaxD
 // ParseSeq parses a sequence of JSON values from the input string.
 // It supports both JSON arrays (input starting with '[') and JSON Lines
 // (newline-separated values). Returns an iterator yielding each value.
+// The whole input must be valid UTF-8; if it is not, the first yielded
+// value reports an error.
 func ParseSeq(json string) iter.Seq2[*Value, error] {
 	return func(yield func(*Value, error) bool) {
 		token, _, ok := nextToken(json)
 		if !ok {
+			return
+		}
+		if !jsonliteutf8.Valid(json) {
+			yield(nil, errInvalidUTF8)
 			return
 		}
 		if token == "[" {
@@ -160,8 +217,10 @@ func ParseSeq(json string) iter.Seq2[*Value, error] {
 			return
 		}
 		remaining := json
+		p := getParser()
+		defer putParser(p)
 		for {
-			v, rest, err := parseValue(remaining, DefaultMaxDepth)
+			v, rest, err := parseValue(remaining, DefaultMaxDepth, p)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -180,7 +239,7 @@ func ParseSeq(json string) iter.Seq2[*Value, error] {
 // parseValue parses a JSON value from s.
 // Returns the parsed value, the remaining unparsed string, and any error.
 // The string is passed by value to keep it in registers.
-func parseValue(s string, maxDepth int) (Value, string, error) {
+func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
 	token, rest, ok := nextToken(s)
 	if !ok {
 		return Value{}, rest, errUnexpectedEndOfObject
@@ -208,9 +267,9 @@ func parseValue(s string, maxDepth int) (Value, string, error) {
 		}
 		return makeStringValue(token), rest, nil
 	case '[':
-		return parseArray(s, rest, maxDepth)
+		return parseArray(s, rest, maxDepth, p)
 	case '{':
-		return parseObject(s, rest, maxDepth)
+		return parseObject(s, rest, maxDepth, p)
 	case ']':
 		return Value{}, rest, errEndOfArray
 	case '}':
@@ -225,48 +284,61 @@ func parseValue(s string, maxDepth int) (Value, string, error) {
 	}
 }
 
-func parseArray(start, json string, maxDepth int) (Value, string, error) {
-	elements := make([]Value, 0, 32)
+func parseArray(start, json string, maxDepth int, p *parser) (Value, string, error) {
+	base := len(p.values)
 
 	for i := 0; ; i++ {
 		if i != 0 {
 			token, rest, ok := nextToken(json)
 			if !ok {
+				p.maxValues = max(p.maxValues, len(p.values))
+				p.values = p.values[:base]
 				return Value{}, json, errUnexpectedEndOfArray
 			}
 			if token == "]" {
 				cached := start[:len(start)-len(rest)]
-				result := make([]Value, len(elements)+1)
+				result := make([]Value, len(p.values)-base+1)
 				result[0] = makeStringValue(cached)
-				copy(result[1:], elements)
+				copy(result[1:], p.values[base:])
+				p.maxValues = max(p.maxValues, len(p.values))
+				p.values = p.values[:base]
 				return makeArrayValue(result), rest, nil
 			}
 			if token != "," {
+				p.maxValues = max(p.maxValues, len(p.values))
+				p.values = p.values[:base]
 				return Value{}, json, fmt.Errorf("expected ',' or ']', got %q", token)
 			}
 			json = rest
 		}
 
-		v, rest, err := parseValue(json, maxDepth)
+		v, rest, err := parseValue(json, maxDepth, p)
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := start[:len(start)-len(rest)]
-				result := make([]Value, len(elements)+1)
+				result := make([]Value, 1)
 				result[0] = makeStringValue(cached)
-				copy(result[1:], elements)
 				return makeArrayValue(result), rest, nil
 			}
+			p.maxValues = max(p.maxValues, len(p.values))
+			p.values = p.values[:base]
 			if err == errEndOfArray {
 				return Value{}, json, fmt.Errorf("unexpected ']' after ','")
 			}
 			return Value{}, json, err
 		}
 		json = rest
-		elements = append(elements, v)
+		p.values = append(p.values, v)
 	}
 }
 
-func parseObject(start, json string, maxDepth int) (Value, string, error) {
+// smallObjectFields is the field count at or below which objects skip
+// building the 1-byte hash index; Lookup falls back to a linear key scan,
+// which is faster than hashing at these sizes and saves the hash allocation
+// and per-key maphash calls at parse time.
+const smallObjectFields = 8
+
+func parseObject(start, json string, maxDepth int, p *parser) (Value, string, error) {
 	if maxDepth == 0 {
 		depth, remain := 1, json
 		for depth > 0 {
@@ -287,36 +359,47 @@ func parseObject(start, json string, maxDepth int) (Value, string, error) {
 	}
 
 	maxDepth--
-	fields := make([]field, 0, 16)
+	base := len(p.fields)
 
 	for i := 0; ; i++ {
 		token, rest, ok := nextToken(json)
 		if !ok {
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
 			return Value{}, json, errUnexpectedEndOfObject
 		}
 		if token == "}" {
 			cached := start[:len(start)-len(rest)]
-			result := make([]field, len(fields)+1)
-			copy(result[1:], fields)
+			n := len(p.fields) - base
+			result := make([]field, n+1)
+			copy(result[1:], p.fields[base:])
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
 
 			fields := result[1:]
-			hashes := make([]byte, len(fields), (len(fields)*8+1)/8)
-			for i := range fields {
-				hashes[i] = byte(maphash.String(hashseed, fields[i].k))
+			if n > smallObjectFields {
+				hashes := make([]byte, n)
+				for i := range fields {
+					hashes[i] = byte(maphash.String(hashseed, fields[i].k))
+				}
+				result[0].k = unsafe.String(unsafe.SliceData(hashes), n)
 			}
 
 			result[0].v = makeStringValue(cached)
-			result[0].k = unsafe.String(unsafe.SliceData(hashes), cap(hashes))
 			return makeObjectValue(result), rest, nil
 		}
 		json = rest
 
 		if i != 0 {
 			if token != "," {
+				p.maxFields = max(p.maxFields, len(p.fields))
+				p.fields = p.fields[:base]
 				return Value{}, json, fmt.Errorf("expected ',' or '}', got %q", token)
 			}
 			token, rest, ok = nextToken(json)
 			if !ok {
+				p.maxFields = max(p.maxFields, len(p.fields))
+				p.fields = p.fields[:base]
 				return Value{}, json, errUnexpectedEndOfObject
 			}
 			json = rest
@@ -324,23 +407,31 @@ func parseObject(start, json string, maxDepth int) (Value, string, error) {
 
 		key, err := Unquote(token)
 		if err != nil {
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
 			return Value{}, json, fmt.Errorf("invalid key: %q: %w", token, err)
 		}
 
 		token, rest, ok = nextToken(json)
 		if !ok {
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
 			return Value{}, json, errUnexpectedEndOfObject
 		}
 		if token != ":" {
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
 			return Value{}, json, fmt.Errorf("%q → expected ':', got %q", key, token)
 		}
 		json = rest
 
-		val, rest, err := parseValue(json, maxDepth)
+		val, rest, err := parseValue(json, maxDepth, p)
 		if err != nil {
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
 			return Value{}, json, fmt.Errorf("%q → %w", key, err)
 		}
 		json = rest
-		fields = append(fields, field{k: key, v: val})
+		p.fields = append(p.fields, field{k: key, v: val})
 	}
 }
