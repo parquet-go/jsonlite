@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"hash/maphash"
 	"unsafe"
-
-	jsonliteutf8 "github.com/parquet-go/jsonlite/utf8"
 )
 
 // This file implements "stage 2": a recursive-descent parser that consumes
@@ -20,16 +18,11 @@ type indexCursor struct {
 	hasBS bool // document contains backslashes: string escapes need validation
 }
 
-// parseIndexed is the structural-index equivalent of ParseMaxDepth. Stage 1
-// reports whether the document contains non-ASCII bytes; if so, a second
-// vectorized pass validates UTF-8 (pure-ASCII documents skip it entirely).
+// parseIndexed is the structural-index equivalent of ParseMaxDepth.
 func parseIndexed(data string, maxDepth int) (*Value, error) {
 	indexPtr := indexPool.Get().(*[]uint32)
 	index, flags, err := structuralIndex(data, (*indexPtr)[:0])
 	*indexPtr = index
-	if err == nil && flags&flagNonASCII != 0 && !jsonliteutf8.Valid(data) {
-		err = errInvalidUTF8
-	}
 	if err != nil {
 		indexPool.Put(indexPtr)
 		return nil, err

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
-
-	jsonliteutf8 "github.com/parquet-go/jsonlite/utf8"
 )
 
 const (
@@ -163,13 +161,14 @@ const indexedParseThreshold = 512
 // Objects at maxDepth <= 0 are stored unparsed and will be lazily parsed
 // when accessed via Lookup(), Array(), or Object() methods.
 // Depth is only decremented for objects, not arrays.
-// Returns an error if the JSON is malformed, empty, or not valid UTF-8.
+// Returns an error if the JSON is malformed or empty.
+//
+// The input is treated as opaque bytes: string values are not required to be
+// valid UTF-8 and are preserved as-is. Callers that need the RFC 8259 UTF-8
+// requirement can validate the document upfront with the utf8 subpackage.
 func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
 	if simdStage1() && len(data) >= indexedParseThreshold {
 		return parseIndexed(data, maxDepth)
-	}
-	if !jsonliteutf8.Valid(data) {
-		return nil, errInvalidUTF8
 	}
 	p := getParser()
 	v, rest, err := parseValue(data, max(0, maxDepth), p)
@@ -191,16 +190,10 @@ func Parse(data string) (*Value, error) { return ParseMaxDepth(data, DefaultMaxD
 // ParseSeq parses a sequence of JSON values from the input string.
 // It supports both JSON arrays (input starting with '[') and JSON Lines
 // (newline-separated values). Returns an iterator yielding each value.
-// The whole input must be valid UTF-8; if it is not, the first yielded
-// value reports an error.
 func ParseSeq(json string) iter.Seq2[*Value, error] {
 	return func(yield func(*Value, error) bool) {
 		token, _, ok := nextToken(json)
 		if !ok {
-			return
-		}
-		if !jsonliteutf8.Valid(json) {
-			yield(nil, errInvalidUTF8)
 			return
 		}
 		if token == "[" {

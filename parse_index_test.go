@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	jsonliteutf8 "github.com/parquet-go/jsonlite/utf8"
 )
 
 // differentialInputs collects a broad set of valid and invalid JSON inputs.
@@ -276,9 +274,6 @@ const internalCloudLoggingPayload = `{
 // benchmarks can compare it against parseIndexed regardless of the CPU
 // dispatch.
 func classicParse(data string, maxDepth int) (*Value, error) {
-	if !jsonliteutf8.Valid(data) {
-		return nil, errInvalidUTF8
-	}
 	p := getParser()
 	v, rest, err := parseValue(data, max(0, maxDepth), p)
 	putParser(p)

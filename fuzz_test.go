@@ -434,10 +434,10 @@ func FuzzQuote(f *testing.F) {
 		"café",
 		"日本語",
 		"hello 🌍",
-		"\u009c",         // U+009C in UTF-8 (0xc2 0x9c) — the regression case
-		"\xc2\x9c",       // same bytes spelled out
-		"\x9c",           // lone 0x9c — invalid UTF-8
-		"\xc2",           // lone 0xc2 — invalid UTF-8 lead byte
+		"\u009c",   // U+009C in UTF-8 (0xc2 0x9c) — the regression case
+		"\xc2\x9c", // same bytes spelled out
+		"\x9c",     // lone 0x9c — invalid UTF-8
+		"\xc2",     // lone 0xc2 — invalid UTF-8 lead byte
 		"mixed\x80high\xffbytes",
 		"prefix\"with\\escapes\xc2\x9cand UTF-8",
 	}

@@ -28,7 +28,6 @@ import (
 var (
 	errUnterminatedString = errors.New("unterminated string")
 	errControlCharacter   = errors.New("unescaped control character in string")
-	errInvalidUTF8        = errors.New("invalid UTF-8")
 )
 
 const oddBits = uint64(0xAAAAAAAAAAAAAAAA)

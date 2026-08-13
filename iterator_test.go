@@ -1372,12 +1372,12 @@ func TestIteratorInt(t *testing.T) {
 		{`"42"`, 42, false},
 		{`"-123"`, -123, false},
 		{`"0"`, 0, false},
-		{`null`, 0, false},  // null returns zero value (0)
-		{`3.14`, 3, false},  // float is truncated to int
+		{`null`, 0, false},   // null returns zero value (0)
+		{`3.14`, 3, false},   // float is truncated to int
 		{`-3.99`, -3, false}, // negative float is truncated toward zero
 		{`1e2`, 100, false},  // scientific notation
-		{`true`, 0, true},   // bool is not valid
-		{`"abc"`, 0, true},  // non-numeric string
+		{`true`, 0, true},    // bool is not valid
+		{`"abc"`, 0, true},   // non-numeric string
 	}
 
 	for _, tt := range tests {

@@ -270,12 +270,12 @@ func TestEscapeIndex(t *testing.T) {
 		{"hello\x7f", -1},
 		{"\x80", -1}, // high bytes pass through (valid UTF-8 content)
 		{"hello\x80", -1},
-		{"café", -1},                     // valid UTF-8 multibyte
-		{"\xc2\x9c", -1},                  // U+009C encoded as UTF-8
-		{"日本語", -1},                      // Japanese characters
+		{"café", -1},     // valid UTF-8 multibyte
+		{"\xc2\x9c", -1}, // U+009C encoded as UTF-8
+		{"日本語", -1},      // Japanese characters
 		{"prefix\xc2\x9csuffix", -1},
-		{"needs\"quoting\xc2\x9c", 5},    // quote escape wins over high byte
-		{"\xc2\x9cneeds\\escape", 7},     // backslash after high bytes
+		{"needs\"quoting\xc2\x9c", 5}, // quote escape wins over high byte
+		{"\xc2\x9cneeds\\escape", 7},  // backslash after high bytes
 		// Test with string longer than 8 bytes to exercise SIMD path
 		{"abcdefghijklmnop", -1},
 		{"abcdefgh\"jklmnop", 8},
