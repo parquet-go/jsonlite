@@ -1,12 +1,15 @@
 package jsonlite
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	jsonliteutf8 "github.com/parquet-go/jsonlite/utf8"
 )
 
 // differentialInputs collects a broad set of valid and invalid JSON inputs.
@@ -268,3 +271,49 @@ const internalCloudLoggingPayload = `{
             "totalSplits": 3
         }
     }`
+
+// classicParse replicates the classic (tokenizer) branch of ParseMaxDepth so
+// benchmarks can compare it against parseIndexed regardless of the CPU
+// dispatch.
+func classicParse(data string, maxDepth int) (*Value, error) {
+	if !jsonliteutf8.Valid(data) {
+		return nil, errInvalidUTF8
+	}
+	p := getParser()
+	v, rest, err := parseValue(data, max(0, maxDepth), p)
+	putParser(p)
+	if err != nil {
+		return nil, err
+	}
+	if extra, _, ok := nextToken(rest); ok {
+		return nil, fmt.Errorf("unexpected token after root value: %q", extra)
+	}
+	return &v, nil
+}
+
+// BenchmarkParsePathCrossover compares the classic and indexed parse paths
+// across document sizes, to validate indexedParseThreshold per platform.
+func BenchmarkParsePathCrossover(b *testing.B) {
+	unit := `{"id":123,"name":"item-name","ok":true},`
+	for _, size := range []int{256, 512, 1024, 2048, 8192} {
+		var sb strings.Builder
+		sb.WriteString(`{"items":[`)
+		for sb.Len() < size-24 {
+			sb.WriteString(unit)
+		}
+		doc := strings.TrimSuffix(sb.String(), ",") + `],"total":12345}`
+		for _, path := range []struct {
+			name string
+			fn   func(string, int) (*Value, error)
+		}{{"classic", classicParse}, {"indexed", parseIndexed}} {
+			b.Run(fmt.Sprintf("%s/%d", path.name, len(doc)), func(b *testing.B) {
+				b.SetBytes(int64(len(doc)))
+				for b.Loop() {
+					if _, err := path.fn(doc, DefaultMaxDepth); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}

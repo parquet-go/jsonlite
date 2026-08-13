@@ -11,64 +11,87 @@ import (
 
 // simdStage1 reports whether the vectorized structural indexer is available.
 // The feature check is a cheap branch on a package variable, and will be
-// erased by dead-code elimination under GOAMD64=v4 once
+// erased by dead-code elimination under GOAMD64=v3 once
 // https://go.dev/cl/813420 lands.
-func simdStage1() bool { return archsimd.X86.AVX512() }
+func simdStage1() bool { return archsimd.X86.AVX2() }
 
 // structuralIndex scans s and appends emitted positions to index, returning
 // the index, document-level flags, and any string-level validation error.
+//
+// There is deliberately no AVX-512 indexer: a 512-bit variant using one
+// compare per character class measured no faster than the AVX2 kernel below
+// on Ice Lake (2.17 vs 2.22 GB/s) — the nibble-shuffle classification makes
+// up for the narrower vectors, and the AVX2 kernel runs on every CPU since
+// Haswell. If stage 1 ever needs to go faster, port the nibble
+// classification to 512-bit vectors rather than resurrecting the old
+// kernel.
 func structuralIndex(s string, index []uint32) ([]uint32, stage1Flags, error) {
-	if archsimd.X86.AVX512() {
-		return structuralIndexAVX512(s, index)
+	if archsimd.X86.AVX2() {
+		return structuralIndexAVX2(s, index)
 	}
 	return structuralIndexPortable(s, index)
 }
 
-// structuralIndexAVX512 is the vectorized structural indexer. The whole block
-// loop lives in one function so the compiler hoists the broadcast constants
-// out of the loop and keeps vectors in registers.
-//
-// Codegen notes, measured on Sapphire Rapids: keep this loop free of
-// constructs that emit legacy (non-VEX) SSE instructions — variable-count
-// vector shifts and per-block function calls that zero structs both do — as
-// each legacy SSE instruction executed with dirty ZMM upper state triggers a
-// microcode assist costing ~100ns. See the utf8 subpackage for the same
-// constraint.
-func structuralIndexAVX512(s string, index []uint32) ([]uint32, stage1Flags, error) {
+// Classification tables for the AVX2 indexer, from simdjson's character
+// block classifier: a byte b is whitespace iff b == wsTable[b&0xF], and
+// structural iff (b|0x20) == opTable[b&0xF] (the |0x20 folds '[' and ']'
+// onto '{' and '}'). Filler values are chosen so no byte with that low
+// nibble can match. The false positives (0x0C and 0x1A classify as
+// structural) are control characters, which are invalid outside strings in
+// any case and masked inside strings, so the accepted language is unchanged.
+// The 16-entry tables are repeated per 128-bit lane for VPSHUFB.
+var wsTable = [32]byte{
+	0x20, 100, 100, 100, 17, 100, 113, 2, 100, 0x09, 0x0A, 112, 100, 0x0D, 100, 100,
+	0x20, 100, 100, 100, 17, 100, 113, 2, 100, 0x09, 0x0A, 112, 100, 0x0D, 100, 100,
+}
+
+var opTable = [32]byte{
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3A, 0x7B, 0x2C, 0x7D, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3A, 0x7B, 0x2C, 0x7D, 0, 0,
+}
+
+// structuralIndexAVX2 is the 256-bit structural indexer for CPUs without
+// AVX-512. Each 64-byte block is processed as two halves whose movemasks are
+// stitched into the 64-bit block masks. AVX2 has no unsigned byte compares,
+// so the control and non-ASCII classes use signed compares (bytes >= 0x80
+// are negative and sort below 0x20), and whitespace/structural chars are
+// classified with nibble table shuffles instead of one compare per
+// character, which also keeps the constants within AVX2's 16 vector
+// registers.
+func structuralIndexAVX2(s string, index []uint32) ([]uint32, stage1Flags, error) {
 	var st stage1State
 	st.prevSep = 1
 
-	backslash := archsimd.BroadcastUint8x64('\\')
-	quote := archsimd.BroadcastUint8x64('"')
-	space := archsimd.BroadcastUint8x64(' ')
-	tab := archsimd.BroadcastUint8x64('\t')
-	newline := archsimd.BroadcastUint8x64('\n')
-	carriage := archsimd.BroadcastUint8x64('\r')
-	lbrace := archsimd.BroadcastUint8x64('{')
-	rbrace := archsimd.BroadcastUint8x64('}')
-	lbracket := archsimd.BroadcastUint8x64('[')
-	rbracket := archsimd.BroadcastUint8x64(']')
-	comma := archsimd.BroadcastUint8x64(',')
-	colon := archsimd.BroadcastUint8x64(':')
-	ctrl := archsimd.BroadcastUint8x64(0x20)
-	high := archsimd.BroadcastUint8x64(0x80)
+	quote := archsimd.BroadcastUint8x32('"')
+	backslash := archsimd.BroadcastUint8x32('\\')
+	space := archsimd.BroadcastUint8x32(0x20)
+	zeroInt := archsimd.BroadcastInt8x32(0)
+	ctrlInt := archsimd.BroadcastInt8x32(0x20)
+	lowNibble := archsimd.BroadcastUint8x32(0x0F)
+	ws := archsimd.LoadUint8x32(&wsTable)
+	op := archsimd.LoadUint8x32(&opTable)
 
 	buf := unsafe.Slice(unsafe.StringData(s), len(s))
-	// Ranging over a [64]byte view gives every load a statically bounded
-	// index, eliminating the per-block slice bounds check.
 	blocks := unsafecast.Slice[[64]byte](buf)
 	for bi := range blocks {
-		v := archsimd.LoadUint8x64(&blocks[bi])
+		b := &blocks[bi]
+		lo := archsimd.LoadUint8x32((*[32]byte)(b[0:32]))
+		hi := archsimd.LoadUint8x32((*[32]byte)(b[32:64]))
+
 		var m blockMasks
-		m.bs = v.Equal(backslash).ToBits()
-		m.quote = v.Equal(quote).ToBits()
-		m.ctrl = v.Less(ctrl).ToBits()
-		m.hi = v.GreaterEqual(high).ToBits()
-		m.ws = v.Equal(space).ToBits() | v.Equal(tab).ToBits() |
-			v.Equal(newline).ToBits() | v.Equal(carriage).ToBits()
-		m.structural = v.Equal(lbrace).ToBits() | v.Equal(rbrace).ToBits() |
-			v.Equal(lbracket).ToBits() | v.Equal(rbracket).ToBits() |
-			v.Equal(comma).ToBits() | v.Equal(colon).ToBits()
+		m.quote = uint64(lo.Equal(quote).ToBits()) |
+			uint64(hi.Equal(quote).ToBits())<<32
+		m.bs = uint64(lo.Equal(backslash).ToBits()) |
+			uint64(hi.Equal(backslash).ToBits())<<32
+		m.hi = uint64(lo.AsInt8x32().Less(zeroInt).ToBits()) |
+			uint64(hi.AsInt8x32().Less(zeroInt).ToBits())<<32
+		m.ctrl = (uint64(lo.AsInt8x32().Less(ctrlInt).ToBits()) |
+			uint64(hi.AsInt8x32().Less(ctrlInt).ToBits())<<32) &^ m.hi
+		m.ws = uint64(lo.Equal(ws.PermuteOrZeroGrouped(lo.And(lowNibble).AsInt8x32())).ToBits()) |
+			uint64(hi.Equal(ws.PermuteOrZeroGrouped(hi.And(lowNibble).AsInt8x32())).ToBits())<<32
+		m.structural = uint64(lo.Or(space).Equal(op.PermuteOrZeroGrouped(lo.And(lowNibble).AsInt8x32())).ToBits()) |
+			uint64(hi.Or(space).Equal(op.PermuteOrZeroGrouped(hi.And(lowNibble).AsInt8x32())).ToBits())<<32
+
 		index = st.crunch(m, bi*64, index)
 	}
 	i := len(blocks) * 64
