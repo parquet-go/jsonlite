@@ -170,9 +170,10 @@ func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
 	if simdStage1() && len(data) >= indexedParseThreshold {
 		return parseIndexed(data, maxDepth)
 	}
-	p := getParser()
-	v, rest, err := parseValue(data, max(0, maxDepth), p)
-	putParser(p)
+	// A nil parser is passed down: parseArray and parseObject acquire the
+	// pooled scratch stacks on first use, so documents whose root is a
+	// primitive never pay the pool round-trip.
+	v, rest, err := parseValue(data, max(0, maxDepth), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +279,12 @@ func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
 }
 
 func parseArray(start, json string, maxDepth int, p *parser) (Value, string, error) {
+	// The root container acquires the pooled scratch and owns its return;
+	// nested containers receive the parser from their parent.
+	if p == nil {
+		p = getParser()
+		defer putParser(p)
+	}
 	base := len(p.values)
 
 	for i := 0; ; i++ {
@@ -352,6 +359,13 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 	}
 
 	maxDepth--
+	// The root container acquires the pooled scratch and owns its return;
+	// nested containers receive the parser from their parent. Acquired after
+	// the lazy-object path above, which uses no scratch.
+	if p == nil {
+		p = getParser()
+		defer putParser(p)
+	}
 	base := len(p.fields)
 
 	for i := 0; ; i++ {

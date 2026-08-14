@@ -28,9 +28,9 @@ func parseIndexed(data string, maxDepth int) (*Value, error) {
 		return nil, err
 	}
 	c := indexCursor{s: data, index: index, hasBS: flags&flagBackslash != 0}
-	p := getParser()
-	v, err := parseIndexedValue(&c, max(0, maxDepth), p)
-	putParser(p)
+	// As in ParseMaxDepth, container parsing acquires the pooled scratch on
+	// first use.
+	v, err := parseIndexedValue(&c, max(0, maxDepth), nil)
 	if err == nil && c.pos != len(c.index) {
 		err = fmt.Errorf("unexpected token after root value at offset %d", c.index[c.pos])
 	}
@@ -152,6 +152,10 @@ func parseIndexedValue(c *indexCursor, maxDepth int, p *parser) (Value, error) {
 }
 
 func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, error) {
+	if p == nil {
+		p = getParser()
+		defer putParser(p)
+	}
 	base := len(p.values)
 
 	for i := 0; ; i++ {
@@ -222,6 +226,10 @@ func parseIndexedObject(c *indexCursor, start, maxDepth int, p *parser) (Value, 
 	}
 
 	maxDepth--
+	if p == nil {
+		p = getParser()
+		defer putParser(p)
+	}
 	base := len(p.fields)
 
 	for i := 0; ; i++ {
