@@ -12,8 +12,16 @@ import (
 // snake_case key names, sized to sit around the smallObjectFields threshold.
 func smallObject(n int) (string, []string) {
 	names := []string{
-		"id", "name", "email", "created_at", "updated_at", "status",
-		"account_id", "region", "tier", "owner",
+		"id",
+		"name",
+		"email",
+		"created_at",
+		"updated_at",
+		"status",
+		"account_id",
+		"region",
+		"tier",
+		"owner",
 	}
 	keys := make([]string, n)
 	parts := make([]string, n)
