@@ -4,8 +4,18 @@ package jsonlite
 
 import (
 	"math/bits"
+	"math/rand/v2"
 	"unsafe"
 )
+
+// hashseed randomizes the tag bytes across processes, so the key sets that
+// collide cannot be worked out ahead of time from a published document.
+//
+// A single multiply is weaker protection than maphash: an attacker who
+// recovers the seed can force every key in an object onto one tag. The damage
+// is bounded, since a fully collided index degrades to the linear key scan
+// small objects already perform, but it is weaker.
+var hashseed = rand.Uint64()
 
 // hashKey produces the 1-byte tag stored in an object's hash index.
 //
@@ -50,5 +60,5 @@ func hashKey(k string) byte {
 	case n > 0:
 		x = uint64(*(*byte)(p))
 	}
-	return byte(((x ^ (hashseed64 + uint64(n))) * 0x9E3779B97F4A7C15) >> 56)
+	return byte(((x ^ (hashseed + uint64(n))) * 0x9E3779B97F4A7C15) >> 56)
 }

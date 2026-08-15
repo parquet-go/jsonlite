@@ -4,6 +4,10 @@ package jsonlite
 
 import "hash/maphash"
 
+// hashseed randomizes the tag bytes across processes; see the note on the
+// amd64 build's seed for what that does and does not protect against.
+var hashseed = maphash.MakeSeed()
+
 // hashKey falls back to maphash on the architectures that the compiler does
 // not mark unalignedOK, where the raw unaligned loads in hash_fast.go would
 // fault rather than merely run slowly.

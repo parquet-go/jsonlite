@@ -173,11 +173,14 @@ func BenchmarkHashKey(b *testing.B) {
 		hashSink = s
 	})
 	// The baseline hashKey replaced, kept so the comparison stays runnable.
+	// It seeds itself rather than reusing the package seed, which the fast
+	// builds keep as a plain uint64.
 	b.Run("maphash", func(b *testing.B) {
+		seed := maphash.MakeSeed()
 		var s byte
 		for b.Loop() {
 			for _, k := range keys {
-				s ^= byte(maphash.String(hashseed, k))
+				s ^= byte(maphash.String(seed, k))
 			}
 		}
 		hashSink = s

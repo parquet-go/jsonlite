@@ -3,7 +3,6 @@ package jsonlite
 import (
 	"encoding/json"
 	"fmt"
-	"hash/maphash"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -19,13 +18,6 @@ const (
 	// unparsedBit is set for objects/arrays that haven't been parsed yet (lazy parsing).
 	// On 64-bit systems this is bit 60, on 32-bit systems this is bit 28.
 	unparsedBit = uintptr(1) << (kindShift - 1)
-)
-
-var (
-	// hashseed is the seed used for hashing object keys.
-	hashseed = maphash.MakeSeed()
-	// hashseed64 is the same seed in a form the arithmetic hashes can mix in.
-	hashseed64 = maphash.Comparable(hashseed, 0)
 )
 
 // Kind represents the type of a JSON value.
