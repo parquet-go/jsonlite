@@ -1,4 +1,4 @@
-//go:build amd64 || arm64
+//go:build amd64 || 386 || arm64 || ppc64 || ppc64le || loong64 || s390x || wasm
 
 package jsonlite
 
@@ -22,8 +22,22 @@ import (
 // recovers. If a change to this function pushes it over the budget the win
 // disappears; `go build -gcflags=-m=2` reports the cost.
 //
-// This build is restricted to architectures where unaligned loads are cheap
-// and permitted; see hash_generic.go for the portable fallback.
+// The two loads are raw unaligned dereferences, which is what keeps the
+// function inlinable: routing them through binary.LittleEndian, the portable
+// idiom the runtime uses in readUnaligned64, measures at cost 111 and does
+// not inline. So this build is constrained to the architectures the compiler
+// marks unalignedOK in cmd/compile/internal/ssa/config.go; arm, mips, mipsle,
+// mips64, mips64le and riscv64 take the maphash fallback in hash_generic.go.
+//
+// The loads are native-endian, so a big-endian build computes different tags
+// than a little-endian one. That is harmless: a tag is only ever compared
+// against another tag produced by the same process.
+//
+// 386 qualifies on alignment but is the one 32-bit member of the set, and the
+// 64-bit arithmetic below costs enough there to miss the inline budget
+// (cost 93), so 386 gets this hash out of line and with emulated 64-bit ops.
+// Whether that still beats maphash on 386 is unmeasured; if it does not, 386
+// is the one entry worth moving to hash_generic.go.
 func hashKey(k string) byte {
 	n := len(k)
 	p := unsafe.Pointer(unsafe.StringData(k))
