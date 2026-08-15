@@ -24,6 +24,8 @@ const (
 var (
 	// hashseed is the seed used for hashing object keys.
 	hashseed = maphash.MakeSeed()
+	// hashseed64 is the same seed in a form the arithmetic hashes can mix in.
+	hashseed64 = maphash.Comparable(hashseed, 0)
 )
 
 // Kind represents the type of a JSON value.
@@ -238,7 +240,7 @@ func (v *Value) Lookup(k string) *Value {
 		}
 		return nil
 	}
-	refkey := byte(maphash.String(hashseed, k))
+	refkey := hashKey(k)
 	offset := 0
 	for {
 		i := strings.IndexByte(hashes[offset:], refkey)

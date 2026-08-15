@@ -1,0 +1,40 @@
+//go:build amd64 || arm64
+
+package jsonlite
+
+import (
+	"math/bits"
+	"unsafe"
+)
+
+// hashKey produces the 1-byte tag stored in an object's hash index.
+//
+// Only one byte of the hash is ever consumed, so a general-purpose 64-bit hash
+// is heavily over-provisioned for the job: this folds the first and last 8
+// bytes of the key into one word and mixes it with a single multiply, taking
+// the top byte of the product. Every input bit reaches that byte, which is all
+// the entropy a 1-byte tag can use. Cost is independent of key length, and
+// both loads stay inside the key's own bytes.
+//
+// The shape is deliberately kept under the inliner's budget (cost 75 of 80).
+// At roughly 2ns a call the call overhead alone would be a third of the cost,
+// so adding a tier here, or richer mixing in the n<4 case, costs more than it
+// recovers. If a change to this function pushes it over the budget the win
+// disappears; `go build -gcflags=-m=2` reports the cost.
+//
+// This build is restricted to architectures where unaligned loads are cheap
+// and permitted; see hash_generic.go for the portable fallback.
+func hashKey(k string) byte {
+	n := len(k)
+	p := unsafe.Pointer(unsafe.StringData(k))
+	var x uint64
+	switch {
+	case n >= 8:
+		x = *(*uint64)(p) ^ bits.RotateLeft64(*(*uint64)(unsafe.Add(p, n-8)), 32)
+	case n >= 4:
+		x = uint64(*(*uint32)(p)) | uint64(*(*uint32)(unsafe.Add(p, n-4)))<<32
+	case n > 0:
+		x = uint64(*(*byte)(p))
+	}
+	return byte(((x ^ (hashseed64 + uint64(n))) * 0x9E3779B97F4A7C15) >> 56)
+}
