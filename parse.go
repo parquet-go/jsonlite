@@ -18,6 +18,7 @@ var (
 	errEndOfObject           = errors.New("}")
 	errEndOfArray            = errors.New("]")
 	errUnexpectedEndOfObject = errors.New("unexpected end of object")
+	errMaxNestingDepth       = errors.New("exceeded maximum nesting depth")
 	errUnexpectedEndOfArray  = errors.New("unexpected end of array")
 )
 
@@ -116,6 +117,22 @@ func nextToken(s string) (token, rest string, ok bool) {
 	}
 }
 
+// maxNestingDepth bounds how deeply containers may nest before parsing fails.
+//
+// This is a limit on recursion, not the same thing as ParseMaxDepth's
+// maxDepth: that one controls how far into nested *objects* values are
+// eagerly parsed, and leaves anything deeper stored unparsed for later, which
+// is a feature rather than a failure. Arrays were subject to neither, so
+// nesting recursed without bound and a document of nothing but open brackets
+// crashed the process with a stack overflow -- which is fatal in Go and
+// cannot be recovered. ParseMaxDepth(doc, 1) crashed just the same, since
+// maxDepth never applied to arrays at all.
+//
+// 10000 matches encoding/json's limit. At roughly a kilobyte of goroutine
+// stack per level it bounds a parse to about 10MB of stack, far below the 1GB
+// ceiling where the runtime gives up.
+const maxNestingDepth = 10000
+
 // parser holds scratch stacks shared across the whole parse. Container
 // parsing appends to these stacks and copies completed containers into
 // exact-size allocations, avoiding a scratch allocation per container.
@@ -126,6 +143,9 @@ type parser struct {
 	// values and fields it is not scratch: the completed objects alias it, so
 	// it is handed off at the end of the parse rather than reused.
 	tags []byte
+	// depth is the current container nesting level, bounded by
+	// maxNestingDepth so that deeply nested input cannot overflow the stack.
+	depth int
 	// high-water marks: the largest lengths reached during this parse,
 	// so putParser only clears entries that were actually written.
 	maxValues int
@@ -156,6 +176,7 @@ func putParser(p *parser) {
 	p.tags = nil
 	p.maxValues = 0
 	p.maxFields = 0
+	p.depth = 0
 	parserPool.Put(p)
 }
 
@@ -319,7 +340,15 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 			json = rest
 		}
 
+		p.depth++
+		if p.depth > maxNestingDepth {
+			p.depth--
+			p.maxValues = max(p.maxValues, len(p.values))
+			p.values = p.values[:base]
+			return Value{}, json, errMaxNestingDepth
+		}
 		v, rest, err := parseValue(json, maxDepth, p)
+		p.depth--
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := start[:len(start)-len(rest)]
@@ -445,7 +474,15 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 		}
 		json = rest
 
+		p.depth++
+		if p.depth > maxNestingDepth {
+			p.depth--
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
+			return Value{}, json, errMaxNestingDepth
+		}
 		val, rest, err := parseValue(json, maxDepth, p)
+		p.depth--
 		if err != nil {
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]
