@@ -168,7 +168,7 @@ func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, e
 			if c.s[j] == ']' {
 				c.pos++
 				cached := c.s[start : j+1]
-				result := make([]Value, len(p.values)-base+1)
+				result := p.allocValues(len(p.values) - base + 1)
 				result[0] = makeStringValue(cached)
 				copy(result[1:], p.values[base:])
 				p.maxValues = max(p.maxValues, len(p.values))
@@ -195,7 +195,7 @@ func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, e
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := c.s[start : int(c.index[c.pos-1])+1]
-				result := make([]Value, 1)
+				result := p.allocValues(1)
 				result[0] = makeStringValue(cached)
 				return makeArrayValue(result), nil
 			}
@@ -250,7 +250,7 @@ func parseIndexedObject(c *indexCursor, start, maxDepth int, p *parser) (Value, 
 			c.pos++
 			cached := c.s[start : j+1]
 			n := len(p.fields) - base
-			result := make([]field, n+1)
+			result := p.allocFields(n + 1)
 			copy(result[1:], p.fields[base:])
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]

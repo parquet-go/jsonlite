@@ -139,10 +139,13 @@ const maxNestingDepth = 10000
 type parser struct {
 	values []Value
 	fields []field
-	// tags is the block object hash indexes are bump-allocated from. Unlike
-	// values and fields it is not scratch: the completed objects alias it, so
-	// it is handed off at the end of the parse rather than reused.
-	tags []byte
+	// tags, valueBlock and fieldBlock are the arenas completed containers are
+	// carved out of. Unlike values and fields above they are not scratch: the
+	// returned values alias them, so they are handed off at the end of the
+	// parse rather than reused. See arena.go.
+	tags       []byte
+	valueBlock []Value
+	fieldBlock []field
 	// depth is the current container nesting level, bounded by
 	// maxNestingDepth so that deeply nested input cannot overflow the stack.
 	depth int
@@ -170,10 +173,12 @@ func putParser(p *parser) {
 	clear(p.fields[:min(p.maxFields, cap(p.fields))])
 	p.values = p.values[:0]
 	p.fields = p.fields[:0]
-	// The tag block is aliased by the objects this parse produced, so it must
-	// be released rather than reused: writing into it again would mutate the
-	// strings those objects already hold.
+	// The arena blocks are aliased by the values this parse produced, so they
+	// must be released rather than reused: carving from them again would hand
+	// out storage those values already own.
 	p.tags = nil
+	p.valueBlock = nil
+	p.fieldBlock = nil
 	p.maxValues = 0
 	p.maxFields = 0
 	p.depth = 0
@@ -325,7 +330,7 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 			}
 			if token == "]" {
 				cached := start[:len(start)-len(rest)]
-				result := make([]Value, len(p.values)-base+1)
+				result := p.allocValues(len(p.values) - base + 1)
 				result[0] = makeStringValue(cached)
 				copy(result[1:], p.values[base:])
 				p.maxValues = max(p.maxValues, len(p.values))
@@ -352,7 +357,7 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := start[:len(start)-len(rest)]
-				result := make([]Value, 1)
+				result := p.allocValues(1)
 				result[0] = makeStringValue(cached)
 				return makeArrayValue(result), rest, nil
 			}
@@ -420,7 +425,7 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 		if token == "}" {
 			cached := start[:len(start)-len(rest)]
 			n := len(p.fields) - base
-			result := make([]field, n+1)
+			result := p.allocFields(n + 1)
 			copy(result[1:], p.fields[base:])
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]
