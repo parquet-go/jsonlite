@@ -1,0 +1,77 @@
+package jsonlite
+
+import (
+	"testing"
+
+	"github.com/parquet-go/jsonlite/internal/benchdata"
+)
+
+// BenchmarkScanCorpus compares the two ways jsonlite finds structure in a
+// document, over the same inputs:
+//
+//   - tokenizer: nextToken, the scalar scanner that Tokenizer and Iterator
+//     drive one token at a time.
+//   - stage1: structuralIndex, the block-at-a-time indexer, vectorized on
+//     amd64 under GOEXPERIMENT=simd and scalar everywhere else.
+//
+// Iterator is built on the tokenizer and never touches stage 1, so the gap
+// between these two is the headroom available to a stage-1-backed Iterator.
+// Reading it on a machine where simdStage1() is false measures the scalar
+// indexer and understates the gap.
+func BenchmarkScanCorpus(b *testing.B) {
+	b.Logf("simdStage1()=%v", simdStage1())
+	for _, d := range benchdata.Corpus() {
+		b.Run(d.Name+"/tokenizer", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(d.JSON)))
+			for b.Loop() {
+				s := d.JSON
+				for {
+					_, rest, ok := nextToken(s)
+					if !ok {
+						break
+					}
+					s = rest
+				}
+			}
+		})
+		b.Run(d.Name+"/stage1", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(d.JSON)))
+			index := make([]uint32, 0, 1024)
+			for b.Loop() {
+				var err error
+				index, _, err = structuralIndex(d.JSON, index[:0])
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParsePathsCorpus compares the two parse implementations directly,
+// bypassing the length threshold in ParseMaxDepth so both run on every
+// document. The crossover this reveals is what indexedParseThreshold encodes.
+func BenchmarkParsePathsCorpus(b *testing.B) {
+	for _, d := range benchdata.Corpus() {
+		b.Run(d.Name+"/scalar", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(d.JSON)))
+			for b.Loop() {
+				if _, _, err := parseValue(d.JSON, DefaultMaxDepth, nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(d.Name+"/indexed", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(d.JSON)))
+			for b.Loop() {
+				if _, err := parseIndexed(d.JSON, DefaultMaxDepth); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
