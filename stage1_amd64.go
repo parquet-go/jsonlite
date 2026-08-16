@@ -70,7 +70,7 @@ func structuralIndexAVX2(s string, index []uint32) ([]uint32, stage1Flags, error
 	ws := archsimd.LoadUint8x32(&wsTable)
 	op := archsimd.LoadUint8x32(&opTable)
 
-	buf := stringBytes(s)
+	buf := unsafecast.Bytes(s)
 	blocks := unsafecast.Slice[[64]byte](buf)
 	for bi := range blocks {
 		b := &blocks[bi]

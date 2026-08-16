@@ -200,7 +200,7 @@ func structuralIndexPortable(s string, index []uint32) ([]uint32, stage1Flags, e
 	var st stage1State
 	st.prevSep = 1
 
-	buf := stringBytes(s)
+	buf := unsafecast.Bytes(s)
 	blocks := unsafecast.Slice[[64]byte](buf)
 	for bi := range blocks {
 		index = st.crunch(classifyBlockPortable(&blocks[bi]), bi*64, index)
