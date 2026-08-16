@@ -3,16 +3,10 @@ package jsonlite
 import (
 	"fmt"
 	"math/bits"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 	"unsafe"
-)
-
-const (
-	// UTF-16 surrogate pair boundaries (from Unicode standard)
-	surrogateMin    = 0xD800 // Start of high surrogate range
-	lowSurrogateMin = 0xDC00 // Start of low surrogate range
-	lowSurrogateMax = 0xDFFF // End of low surrogate range
 )
 
 // Unquote removes quotes from a JSON string and processes escape sequences.
@@ -164,30 +158,31 @@ func unquote(b []byte, s string) ([]byte, error) {
 				return b, fmt.Errorf("invalid unicode escape sequence")
 			}
 
-			// Check for UTF-16 surrogate pair
-			if utf16.IsSurrogate(r1) {
-				// Low surrogate without high surrogate is an error
-				if r1 >= lowSurrogateMin {
-					return b, fmt.Errorf("invalid surrogate pair: unexpected low surrogate")
-				}
-				// High surrogate, look for low surrogate
-				if i+12 > len(s) || s[i+6] != '\\' || s[i+7] != 'u' {
-					return b, fmt.Errorf("invalid surrogate pair: missing low surrogate")
-				}
-				r2, ok := parseHex4(s[i+8 : i+12])
-				if !ok {
-					return b, fmt.Errorf("invalid unicode escape sequence in surrogate pair")
-				}
-				if r2 < lowSurrogateMin || r2 > lowSurrogateMax {
-					return b, fmt.Errorf("invalid surrogate pair: low surrogate out of range")
-				}
-				// Decode the surrogate pair
-				b = utf8.AppendRune(b, utf16.DecodeRune(r1, r2))
-				s = s[i+12:]
-			} else {
+			// An escape that is not a surrogate stands on its own. A high
+			// surrogate pairs with a following low surrogate; anything else
+			// is unpaired and decodes to the replacement character, which is
+			// what RFC 8259 permits and what encoding/json does. Returning an
+			// error here instead silently truncated the string, because
+			// Value.String discards it and keeps the partial result.
+			rest := s[i+6:]
+			switch {
+			case !utf16.IsSurrogate(r1):
 				b = utf8.AppendRune(b, r1)
-				s = s[i+6:]
+			case len(rest) >= 6 && rest[0] == '\\' && rest[1] == 'u':
+				r2, ok := parseHex4(rest[2:6])
+				if r := utf16.DecodeRune(r1, r2); ok && r != unicode.ReplacementChar {
+					b = utf8.AppendRune(b, r)
+					rest = rest[6:]
+				} else {
+					// The following escape is not a low surrogate, so r1 is
+					// unpaired. Leave the escape for the next iteration to
+					// decode on its own terms.
+					b = utf8.AppendRune(b, unicode.ReplacementChar)
+				}
+			default:
+				b = utf8.AppendRune(b, unicode.ReplacementChar)
 			}
+			s = rest
 		default:
 			return b, fmt.Errorf("invalid escape character: %q", c)
 		}
