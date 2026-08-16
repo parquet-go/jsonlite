@@ -1,6 +1,7 @@
 package jsonlite_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/parquet-go/jsonlite"
@@ -269,30 +270,6 @@ func TestUnquoteInvalid(t *testing.T) {
 			name:  "single quotes instead of double quotes returns error",
 			input: "'hello'",
 		},
-		{
-			name:  "high surrogate without low surrogate returns error",
-			input: `"\ud83d"`,
-		},
-		{
-			name:  "high surrogate followed by text returns error",
-			input: `"\ud83dtext"`,
-		},
-		{
-			name:  "high surrogate followed by normal unicode returns error",
-			input: `"\ud83d\u0041"`,
-		},
-		{
-			name:  "low surrogate without high surrogate returns error",
-			input: `"\ude00"`,
-		},
-		{
-			name:  "low surrogate alone returns error",
-			input: `"\udc96"`,
-		},
-		{
-			name:  "high surrogate with invalid low surrogate returns error",
-			input: `"\ud83d\uffff"`,
-		},
 	}
 
 	for _, tt := range tests {
@@ -386,6 +363,53 @@ func BenchmarkAppendUnquote(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				buf, _ = jsonlite.AppendUnquote(buf[:0], input.value)
+			}
+		})
+	}
+}
+
+// TestUnquoteUnpairedSurrogates pins the behaviour of surrogate escapes that
+// do not form a pair. They are not an error: RFC 8259 leaves the handling to
+// the implementation, and jsonlite follows encoding/json in decoding them to
+// the replacement character.
+//
+// These cases previously returned an error from Unquote. Since Value.String
+// has no error to return and discarded it, that error surfaced as a silently
+// truncated string -- `"\ud800x"` read back as "" rather than "�x" --
+// which is why the behaviour changed rather than the error being propagated.
+func TestUnquoteUnpairedSurrogates(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"lone high surrogate", `"\ud83d"`, "�"},
+		{"high surrogate then text", `"\ud83dtext"`, "�text"},
+		{"high surrogate then non-surrogate escape", `"\ud83dA"`, "�A"},
+		{"lone low surrogate", `"\ude00"`, "�"},
+		{"low surrogate alone", `"\udc96"`, "�"},
+		{"high surrogate then out-of-range escape", `"\ud83d￿"`, "�￿"},
+		{"two high surrogates", `"\ud800\ud800"`, "��"},
+		{"high surrogate then newline escape", `"\ud800\n"`, "�\n"},
+		{"unpaired surrogate between text", `"a\ud800b"`, "a�b"},
+		{"valid pair still decodes", `"😀"`, "\U0001F600"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := jsonlite.Unquote(tt.input)
+			if err != nil {
+				t.Fatalf("Unquote(%q) returned error: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Errorf("Unquote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+			// The whole point is agreeing with encoding/json here.
+			var std string
+			if err := json.Unmarshal([]byte(tt.input), &std); err != nil {
+				t.Fatalf("encoding/json rejected %q: %v", tt.input, err)
+			}
+			if got != std {
+				t.Errorf("Unquote(%q) = %q, encoding/json = %q", tt.input, got, std)
 			}
 		})
 	}
