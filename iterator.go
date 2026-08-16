@@ -24,11 +24,13 @@ type Iterator struct {
 	keyDecoded bool
 	err        error
 	state      []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
+	consumed   bool   // whether the current value has been consumed
 	// bytes backs state inline. One byte per open container, so this covers
 	// documents up to 64 deep without allocating; beyond that state grows on
 	// the heap, which is the only allocation a walk would otherwise perform.
-	bytes    [64]byte
-	consumed bool // whether the current value has been consumed
+	// Widening it from 16 costs nothing measurable, including on shallow
+	// documents that never use more than a few entries.
+	bytes [64]byte
 }
 
 // Iterate creates a new Iterator for the given JSON string.
