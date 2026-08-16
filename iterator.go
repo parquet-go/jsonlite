@@ -18,8 +18,11 @@ type Iterator struct {
 	key      string
 	err      error
 	state    []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
-	bytes    [16]byte
-	consumed bool // whether the current value has been consumed
+	consumed bool   // whether the current value has been consumed
+	// bytes backs state inline. One byte per open container, so this covers
+	// documents up to 64 deep without allocating; beyond that state grows on
+	// the heap, which is the only allocation a walk would otherwise perform.
+	bytes [64]byte
 }
 
 // Iterate creates a new Iterator for the given JSON string.
@@ -264,7 +267,7 @@ func (it *Iterator) value() (Value, error) {
 		delimi := len(it.token)
 		offset := len(it.json) - len(it.tokens.json) - delimi
 		p := getParser()
-		val, rest, err := parseArray(it.json[offset:], it.tokens.json, DefaultMaxDepth, p)
+		val, rest, err := p.parseArray(it.json[offset:], it.tokens.json, DefaultMaxDepth)
 		putParser(p)
 		it.tokens.json, it.consumed = rest, true
 		if err != nil {
@@ -276,7 +279,7 @@ func (it *Iterator) value() (Value, error) {
 		delimi := len(it.token)
 		offset := len(it.json) - len(it.tokens.json) - delimi
 		p := getParser()
-		val, rest, err := parseObject(it.json[offset:], it.tokens.json, DefaultMaxDepth, p)
+		val, rest, err := p.parseObject(it.json[offset:], it.tokens.json, DefaultMaxDepth)
 		putParser(p)
 		it.tokens.json, it.consumed = rest, true
 		if err != nil {

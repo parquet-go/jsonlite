@@ -6,7 +6,8 @@ import (
 	"iter"
 	"strings"
 	"sync"
-	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 const (
@@ -135,14 +136,24 @@ const maxNestingDepth = 10000
 
 // parser holds scratch stacks shared across the whole parse. Container
 // parsing appends to these stacks and copies completed containers into
-// exact-size allocations, avoiding a scratch allocation per container.
+// storage carved from the arenas below, avoiding an allocation per container.
+//
+// A nil *parser is a valid receiver for the parse methods and means "no
+// scratch acquired yet". Each container entry point takes one from the pool
+// on first use and releases it on the way out, so a document whose root is a
+// primitive never touches the pool. The methods reassign their own receiver
+// when they do that, which is invisible to the caller: the receiver is passed
+// by value like any other argument.
 type parser struct {
 	values []Value
 	fields []field
-	// tags is the block object hash indexes are bump-allocated from. Unlike
-	// values and fields it is not scratch: the completed objects alias it, so
-	// it is handed off at the end of the parse rather than reused.
-	tags []byte
+	// tags, valueBlock and fieldBlock are the arenas completed containers are
+	// carved out of. Unlike values and fields above they are not scratch: the
+	// returned values alias them, so they are handed off at the end of the
+	// parse rather than reused. See arena.go.
+	tags       []byte
+	valueBlock []Value
+	fieldBlock []field
 	// depth is the current container nesting level, bounded by
 	// maxNestingDepth so that deeply nested input cannot overflow the stack.
 	depth int
@@ -170,10 +181,12 @@ func putParser(p *parser) {
 	clear(p.fields[:min(p.maxFields, cap(p.fields))])
 	p.values = p.values[:0]
 	p.fields = p.fields[:0]
-	// The tag block is aliased by the objects this parse produced, so it must
-	// be released rather than reused: writing into it again would mutate the
-	// strings those objects already hold.
+	// The arena blocks are aliased by the values this parse produced, so they
+	// must be released rather than reused: carving from them again would hand
+	// out storage those values already own.
 	p.tags = nil
+	p.valueBlock = nil
+	p.fieldBlock = nil
 	p.maxValues = 0
 	p.maxFields = 0
 	p.depth = 0
@@ -182,8 +195,15 @@ func putParser(p *parser) {
 
 // indexedParseThreshold is the document size above which Parse uses the
 // structural-index parser when the vectorized stage 1 is available. Below
-// this size the classic tokenizer is faster.
-const indexedParseThreshold = 512
+// this size the classic tokenizer is faster, because indexing a document has
+// a fixed cost the scalar parser does not pay.
+//
+// Located with BenchmarkThresholdSweep on a Skylake part under
+// GOEXPERIMENT=simd, where the two paths are level at 256 bytes and the
+// indexed one pulls ahead by 12% at 384 and 18% at 512. The gate only applies
+// where simdStage1() is true, so this constant has no effect on builds that
+// fall back to the scalar indexer.
+const indexedParseThreshold = 256
 
 // ParseMaxDepth parses JSON data with a maximum nesting depth for objects.
 // Objects at maxDepth <= 0 are stored unparsed and will be lazily parsed
@@ -198,10 +218,11 @@ func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
 	if simdStage1() && len(data) >= indexedParseThreshold {
 		return parseIndexed(data, maxDepth)
 	}
-	// A nil parser is passed down: parseArray and parseObject acquire the
+	// The nil receiver is deliberate: parseArray and parseObject acquire the
 	// pooled scratch stacks on first use, so documents whose root is a
 	// primitive never pay the pool round-trip.
-	v, rest, err := parseValue(data, max(0, maxDepth), nil)
+	var p *parser
+	v, rest, err := p.parseValue(data, max(0, maxDepth))
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +263,7 @@ func ParseSeq(json string) iter.Seq2[*Value, error] {
 		p := getParser()
 		defer putParser(p)
 		for {
-			v, rest, err := parseValue(remaining, DefaultMaxDepth, p)
+			v, rest, err := p.parseValue(remaining, DefaultMaxDepth)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -261,7 +282,7 @@ func ParseSeq(json string) iter.Seq2[*Value, error] {
 // parseValue parses a JSON value from s.
 // Returns the parsed value, the remaining unparsed string, and any error.
 // The string is passed by value to keep it in registers.
-func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
+func (p *parser) parseValue(s string, maxDepth int) (Value, string, error) {
 	token, rest, ok := nextToken(s)
 	if !ok {
 		return Value{}, rest, errUnexpectedEndOfObject
@@ -289,9 +310,9 @@ func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
 		}
 		return makeStringValue(token), rest, nil
 	case '[':
-		return parseArray(s, rest, maxDepth, p)
+		return p.parseArray(s, rest, maxDepth)
 	case '{':
-		return parseObject(s, rest, maxDepth, p)
+		return p.parseObject(s, rest, maxDepth)
 	case ']':
 		return Value{}, rest, errEndOfArray
 	case '}':
@@ -306,7 +327,7 @@ func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
 	}
 }
 
-func parseArray(start, json string, maxDepth int, p *parser) (Value, string, error) {
+func (p *parser) parseArray(start, json string, maxDepth int) (Value, string, error) {
 	// The root container acquires the pooled scratch and owns its return;
 	// nested containers receive the parser from their parent.
 	if p == nil {
@@ -325,7 +346,7 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 			}
 			if token == "]" {
 				cached := start[:len(start)-len(rest)]
-				result := make([]Value, len(p.values)-base+1)
+				result := p.allocValues(len(p.values) - base + 1)
 				result[0] = makeStringValue(cached)
 				copy(result[1:], p.values[base:])
 				p.maxValues = max(p.maxValues, len(p.values))
@@ -347,12 +368,12 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 			p.values = p.values[:base]
 			return Value{}, json, errMaxNestingDepth
 		}
-		v, rest, err := parseValue(json, maxDepth, p)
+		v, rest, err := p.parseValue(json, maxDepth)
 		p.depth--
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := start[:len(start)-len(rest)]
-				result := make([]Value, 1)
+				result := p.allocValues(1)
 				result[0] = makeStringValue(cached)
 				return makeArrayValue(result), rest, nil
 			}
@@ -380,7 +401,7 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 // and starts paying by 12.
 const smallObjectFields = 8
 
-func parseObject(start, json string, maxDepth int, p *parser) (Value, string, error) {
+func (p *parser) parseObject(start, json string, maxDepth int) (Value, string, error) {
 	if maxDepth == 0 {
 		depth, remain := 1, json
 		for depth > 0 {
@@ -420,7 +441,7 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 		if token == "}" {
 			cached := start[:len(start)-len(rest)]
 			n := len(p.fields) - base
-			result := make([]field, n+1)
+			result := p.allocFields(n + 1)
 			copy(result[1:], p.fields[base:])
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]
@@ -431,7 +452,7 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 				for i := range fields {
 					hashes[i] = hashKey(fields[i].k)
 				}
-				result[0].k = unsafe.String(unsafe.SliceData(hashes), n)
+				result[0].k = unsafecast.String(hashes)
 			}
 
 			result[0].v = makeStringValue(cached)
@@ -481,7 +502,7 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 			p.fields = p.fields[:base]
 			return Value{}, json, errMaxNestingDepth
 		}
-		val, rest, err := parseValue(json, maxDepth, p)
+		val, rest, err := p.parseValue(json, maxDepth)
 		p.depth--
 		if err != nil {
 			p.maxFields = max(p.maxFields, len(p.fields))

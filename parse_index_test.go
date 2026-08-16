@@ -275,7 +275,7 @@ const internalCloudLoggingPayload = `{
 // dispatch.
 func classicParse(data string, maxDepth int) (*Value, error) {
 	p := getParser()
-	v, rest, err := parseValue(data, max(0, maxDepth), p)
+	v, rest, err := p.parseValue(data, max(0, maxDepth))
 	putParser(p)
 	if err != nil {
 		return nil, err
