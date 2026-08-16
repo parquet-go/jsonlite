@@ -183,7 +183,15 @@ func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, e
 			c.pos++
 		}
 
+		p.depth++
+		if p.depth > maxNestingDepth {
+			p.depth--
+			p.maxValues = max(p.maxValues, len(p.values))
+			p.values = p.values[:base]
+			return Value{}, errMaxNestingDepth
+		}
 		v, err := parseIndexedValue(c, maxDepth, p)
+		p.depth--
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := c.s[start : int(c.index[c.pos-1])+1]
@@ -305,7 +313,15 @@ func parseIndexedObject(c *indexCursor, start, maxDepth int, p *parser) (Value, 
 		}
 		c.pos++
 
+		p.depth++
+		if p.depth > maxNestingDepth {
+			p.depth--
+			p.maxFields = max(p.maxFields, len(p.fields))
+			p.fields = p.fields[:base]
+			return Value{}, errMaxNestingDepth
+		}
 		val, err := parseIndexedValue(c, maxDepth, p)
+		p.depth--
 		if err != nil {
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]
