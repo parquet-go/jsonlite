@@ -136,7 +136,14 @@ const maxNestingDepth = 10000
 
 // parser holds scratch stacks shared across the whole parse. Container
 // parsing appends to these stacks and copies completed containers into
-// exact-size allocations, avoiding a scratch allocation per container.
+// storage carved from the arenas below, avoiding an allocation per container.
+//
+// A nil *parser is a valid receiver for the parse methods and means "no
+// scratch acquired yet". Each container entry point takes one from the pool
+// on first use and releases it on the way out, so a document whose root is a
+// primitive never touches the pool. The methods reassign their own receiver
+// when they do that, which is invisible to the caller: the receiver is passed
+// by value like any other argument.
 type parser struct {
 	values []Value
 	fields []field
@@ -211,10 +218,11 @@ func ParseMaxDepth(data string, maxDepth int) (*Value, error) {
 	if simdStage1() && len(data) >= indexedParseThreshold {
 		return parseIndexed(data, maxDepth)
 	}
-	// A nil parser is passed down: parseArray and parseObject acquire the
+	// The nil receiver is deliberate: parseArray and parseObject acquire the
 	// pooled scratch stacks on first use, so documents whose root is a
 	// primitive never pay the pool round-trip.
-	v, rest, err := parseValue(data, max(0, maxDepth), nil)
+	var p *parser
+	v, rest, err := p.parseValue(data, max(0, maxDepth))
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +263,7 @@ func ParseSeq(json string) iter.Seq2[*Value, error] {
 		p := getParser()
 		defer putParser(p)
 		for {
-			v, rest, err := parseValue(remaining, DefaultMaxDepth, p)
+			v, rest, err := p.parseValue(remaining, DefaultMaxDepth)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -274,7 +282,7 @@ func ParseSeq(json string) iter.Seq2[*Value, error] {
 // parseValue parses a JSON value from s.
 // Returns the parsed value, the remaining unparsed string, and any error.
 // The string is passed by value to keep it in registers.
-func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
+func (p *parser) parseValue(s string, maxDepth int) (Value, string, error) {
 	token, rest, ok := nextToken(s)
 	if !ok {
 		return Value{}, rest, errUnexpectedEndOfObject
@@ -302,9 +310,9 @@ func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
 		}
 		return makeStringValue(token), rest, nil
 	case '[':
-		return parseArray(s, rest, maxDepth, p)
+		return p.parseArray(s, rest, maxDepth)
 	case '{':
-		return parseObject(s, rest, maxDepth, p)
+		return p.parseObject(s, rest, maxDepth)
 	case ']':
 		return Value{}, rest, errEndOfArray
 	case '}':
@@ -319,7 +327,7 @@ func parseValue(s string, maxDepth int, p *parser) (Value, string, error) {
 	}
 }
 
-func parseArray(start, json string, maxDepth int, p *parser) (Value, string, error) {
+func (p *parser) parseArray(start, json string, maxDepth int) (Value, string, error) {
 	// The root container acquires the pooled scratch and owns its return;
 	// nested containers receive the parser from their parent.
 	if p == nil {
@@ -360,7 +368,7 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 			p.values = p.values[:base]
 			return Value{}, json, errMaxNestingDepth
 		}
-		v, rest, err := parseValue(json, maxDepth, p)
+		v, rest, err := p.parseValue(json, maxDepth)
 		p.depth--
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
@@ -393,7 +401,7 @@ func parseArray(start, json string, maxDepth int, p *parser) (Value, string, err
 // and starts paying by 12.
 const smallObjectFields = 8
 
-func parseObject(start, json string, maxDepth int, p *parser) (Value, string, error) {
+func (p *parser) parseObject(start, json string, maxDepth int) (Value, string, error) {
 	if maxDepth == 0 {
 		depth, remain := 1, json
 		for depth > 0 {
@@ -494,7 +502,7 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 			p.fields = p.fields[:base]
 			return Value{}, json, errMaxNestingDepth
 		}
-		val, rest, err := parseValue(json, maxDepth, p)
+		val, rest, err := p.parseValue(json, maxDepth)
 		p.depth--
 		if err != nil {
 			p.maxFields = max(p.maxFields, len(p.fields))

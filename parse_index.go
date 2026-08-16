@@ -28,9 +28,10 @@ func parseIndexed(data string, maxDepth int) (*Value, error) {
 		return nil, err
 	}
 	c := indexCursor{s: data, index: index, hasBS: flags&flagBackslash != 0}
-	// As in ParseMaxDepth, container parsing acquires the pooled scratch on
-	// first use.
-	v, err := parseIndexedValue(&c, max(0, maxDepth), nil)
+	// As in ParseMaxDepth, the nil receiver stands for "no scratch acquired
+	// yet"; container parsing takes it from the pool on first use.
+	var p *parser
+	v, err := p.parseIndexedValue(&c, max(0, maxDepth))
 	if err == nil && c.pos != len(c.index) {
 		err = fmt.Errorf("unexpected token after root value at offset %d", c.index[c.pos])
 	}
@@ -82,7 +83,7 @@ func (c *indexCursor) validIndexedString(token string) bool {
 	return validString(token)
 }
 
-func parseIndexedValue(c *indexCursor, maxDepth int, p *parser) (Value, error) {
+func (p *parser) parseIndexedValue(c *indexCursor, maxDepth int) (Value, error) {
 	if c.pos >= len(c.index) {
 		return Value{}, errUnexpectedEndOfObject
 	}
@@ -96,14 +97,14 @@ func parseIndexedValue(c *indexCursor, maxDepth int, p *parser) (Value, error) {
 			start = int(c.index[c.pos-1]) + 1
 		}
 		c.pos++
-		return parseIndexedObject(c, start, maxDepth, p)
+		return p.parseIndexedObject(c, start, maxDepth)
 	case '[':
 		start := 0
 		if c.pos > 0 {
 			start = int(c.index[c.pos-1]) + 1
 		}
 		c.pos++
-		return parseIndexedArray(c, start, maxDepth, p)
+		return p.parseIndexedArray(c, start, maxDepth)
 	case '"':
 		token, err := c.stringToken()
 		if err != nil {
@@ -151,7 +152,7 @@ func parseIndexedValue(c *indexCursor, maxDepth int, p *parser) (Value, error) {
 	}
 }
 
-func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, error) {
+func (p *parser) parseIndexedArray(c *indexCursor, start, maxDepth int) (Value, error) {
 	if p == nil {
 		p = getParser()
 		defer putParser(p)
@@ -191,7 +192,7 @@ func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, e
 			p.values = p.values[:base]
 			return Value{}, errMaxNestingDepth
 		}
-		v, err := parseIndexedValue(c, maxDepth, p)
+		v, err := p.parseIndexedValue(c, maxDepth)
 		p.depth--
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
@@ -211,7 +212,7 @@ func parseIndexedArray(c *indexCursor, start, maxDepth int, p *parser) (Value, e
 	}
 }
 
-func parseIndexedObject(c *indexCursor, start, maxDepth int, p *parser) (Value, error) {
+func (p *parser) parseIndexedObject(c *indexCursor, start, maxDepth int) (Value, error) {
 	if maxDepth == 0 {
 		// Lazy object: skip to the matching close brace by scanning the
 		// index. Braces inside strings are never emitted, so a simple
@@ -321,7 +322,7 @@ func parseIndexedObject(c *indexCursor, start, maxDepth int, p *parser) (Value, 
 			p.fields = p.fields[:base]
 			return Value{}, errMaxNestingDepth
 		}
-		val, err := parseIndexedValue(c, maxDepth, p)
+		val, err := p.parseIndexedValue(c, maxDepth)
 		p.depth--
 		if err != nil {
 			p.maxFields = max(p.maxFields, len(p.fields))

@@ -57,8 +57,9 @@ func BenchmarkParsePathsCorpus(b *testing.B) {
 		b.Run(d.Name+"/scalar", func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(d.JSON)))
+			var p *parser // acquired from the pool on first container
 			for b.Loop() {
-				if _, _, err := parseValue(d.JSON, DefaultMaxDepth, nil); err != nil {
+				if _, _, err := p.parseValue(d.JSON, DefaultMaxDepth); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -85,8 +86,9 @@ func BenchmarkThresholdSweep(b *testing.B) {
 		input := benchSizedRecord(size)
 		b.Run(fmt.Sprintf("size=%04d/scalar", size), func(b *testing.B) {
 			b.SetBytes(int64(len(input)))
+			var p *parser // acquired from the pool on first container
 			for b.Loop() {
-				if _, _, err := parseValue(input, DefaultMaxDepth, nil); err != nil {
+				if _, _, err := p.parseValue(input, DefaultMaxDepth); err != nil {
 					b.Fatal(err)
 				}
 			}
