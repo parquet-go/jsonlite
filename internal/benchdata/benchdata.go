@@ -329,3 +329,16 @@ func pretty(src string) string {
 	}
 	return b.String()
 }
+
+// SizedRecord returns a realistic record padded to approximately size bytes,
+// for locating the crossover between the scalar and indexed parse paths.
+func SizedRecord(size int) string {
+	r := newRand()
+	var b strings.Builder
+	b.WriteString(`{"id":1,"ts":"2024-01-15T10:30:00Z","lvl":"INFO"`)
+	for i := 0; b.Len() < size-24; i++ {
+		fmt.Fprintf(&b, `,"f%02d":"%s"`, i, sentence(r, 1+r.IntN(3)))
+	}
+	b.WriteByte('}')
+	return b.String()
+}

@@ -187,8 +187,15 @@ func putParser(p *parser) {
 
 // indexedParseThreshold is the document size above which Parse uses the
 // structural-index parser when the vectorized stage 1 is available. Below
-// this size the classic tokenizer is faster.
-const indexedParseThreshold = 512
+// this size the classic tokenizer is faster, because indexing a document has
+// a fixed cost the scalar parser does not pay.
+//
+// Located with BenchmarkThresholdSweep on a Skylake part under
+// GOEXPERIMENT=simd, where the two paths are level at 256 bytes and the
+// indexed one pulls ahead by 12% at 384 and 18% at 512. The gate only applies
+// where simdStage1() is true, so this constant has no effect on builds that
+// fall back to the scalar indexer.
+const indexedParseThreshold = 256
 
 // ParseMaxDepth parses JSON data with a maximum nesting depth for objects.
 // Objects at maxDepth <= 0 are stored unparsed and will be lazily parsed

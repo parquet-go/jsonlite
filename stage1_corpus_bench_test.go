@@ -1,6 +1,7 @@
 package jsonlite
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/parquet-go/jsonlite/internal/benchdata"
@@ -69,6 +70,49 @@ func BenchmarkParsePathsCorpus(b *testing.B) {
 			b.SetBytes(int64(len(d.JSON)))
 			for b.Loop() {
 				if _, err := parseIndexed(d.JSON, DefaultMaxDepth); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkThresholdSweep locates the document size at which the indexed
+// parser overtakes the scalar one, which is what indexedParseThreshold
+// encodes. The threshold only matters where simdStage1() is true; measured
+// with it false, the indexed path is handicapped and the crossover reads far
+// higher than it is in a build that can use the vector indexer.
+func BenchmarkThresholdSweep(b *testing.B) {
+	for _, size := range []int{64, 128, 192, 256, 384, 512, 768, 1024, 2048} {
+		input := benchdata.SizedRecord(size)
+		b.Run(fmt.Sprintf("size=%04d/scalar", size), func(b *testing.B) {
+			b.SetBytes(int64(len(input)))
+			for b.Loop() {
+				if _, _, err := parseValue(input, DefaultMaxDepth, nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("size=%04d/indexed", size), func(b *testing.B) {
+			b.SetBytes(int64(len(input)))
+			for b.Loop() {
+				if _, err := parseIndexed(input, DefaultMaxDepth); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkParseSized goes through Parse rather than calling a path directly,
+// so it measures the dispatch indexedParseThreshold controls end to end.
+func BenchmarkParseSized(b *testing.B) {
+	for _, size := range []int{192, 256, 384, 512} {
+		input := benchdata.SizedRecord(size)
+		b.Run(fmt.Sprintf("size=%04d", size), func(b *testing.B) {
+			b.SetBytes(int64(len(input)))
+			for b.Loop() {
+				if _, err := Parse(input); err != nil {
 					b.Fatal(err)
 				}
 			}
