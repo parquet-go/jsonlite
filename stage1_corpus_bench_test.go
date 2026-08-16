@@ -3,8 +3,6 @@ package jsonlite
 import (
 	"fmt"
 	"testing"
-
-	"github.com/parquet-go/jsonlite/internal/benchdata"
 )
 
 // BenchmarkScanCorpus compares the two ways jsonlite finds structure in a
@@ -21,7 +19,7 @@ import (
 // indexer and understates the gap.
 func BenchmarkScanCorpus(b *testing.B) {
 	b.Logf("simdStage1()=%v", simdStage1())
-	for _, d := range benchdata.Corpus() {
+	for _, d := range benchCorpus() {
 		b.Run(d.Name+"/tokenizer", func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(d.JSON)))
@@ -55,7 +53,7 @@ func BenchmarkScanCorpus(b *testing.B) {
 // bypassing the length threshold in ParseMaxDepth so both run on every
 // document. The crossover this reveals is what indexedParseThreshold encodes.
 func BenchmarkParsePathsCorpus(b *testing.B) {
-	for _, d := range benchdata.Corpus() {
+	for _, d := range benchCorpus() {
 		b.Run(d.Name+"/scalar", func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(d.JSON)))
@@ -84,7 +82,7 @@ func BenchmarkParsePathsCorpus(b *testing.B) {
 // higher than it is in a build that can use the vector indexer.
 func BenchmarkThresholdSweep(b *testing.B) {
 	for _, size := range []int{64, 128, 192, 256, 384, 512, 768, 1024, 2048} {
-		input := benchdata.SizedRecord(size)
+		input := benchSizedRecord(size)
 		b.Run(fmt.Sprintf("size=%04d/scalar", size), func(b *testing.B) {
 			b.SetBytes(int64(len(input)))
 			for b.Loop() {
@@ -108,7 +106,7 @@ func BenchmarkThresholdSweep(b *testing.B) {
 // so it measures the dispatch indexedParseThreshold controls end to end.
 func BenchmarkParseSized(b *testing.B) {
 	for _, size := range []int{192, 256, 384, 512} {
-		input := benchdata.SizedRecord(size)
+		input := benchSizedRecord(size)
 		b.Run(fmt.Sprintf("size=%04d", size), func(b *testing.B) {
 			b.SetBytes(int64(len(input)))
 			for b.Loop() {

@@ -1,20 +1,15 @@
-package jsonlite_test
+package jsonlite
 
-import (
-	"testing"
-
-	"github.com/parquet-go/jsonlite"
-	"github.com/parquet-go/jsonlite/internal/benchdata"
-)
+import "testing"
 
 // BenchmarkCorpusParse parses each corpus document into the Value tree.
 func BenchmarkCorpusParse(b *testing.B) {
-	for _, d := range benchdata.Corpus() {
+	for _, d := range benchCorpus() {
 		b.Run(d.Name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(d.JSON)))
 			for b.Loop() {
-				if _, err := jsonlite.Parse(d.JSON); err != nil {
+				if _, err := Parse(d.JSON); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -26,11 +21,11 @@ func BenchmarkCorpusParse(b *testing.B) {
 // which never materializes a Value. Comparing it against BenchmarkCorpusParse
 // separates the cost of scanning from the cost of building the tree.
 func BenchmarkCorpusIterate(b *testing.B) {
-	for _, d := range benchdata.Corpus() {
+	for _, d := range benchCorpus() {
 		b.Run(d.Name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(d.JSON)))
-			it := jsonlite.Iterate(d.JSON)
+			it := Iterate(d.JSON)
 			for b.Loop() {
 				it.Reset(d.JSON)
 				for it.Next() {
@@ -46,11 +41,11 @@ func BenchmarkCorpusIterate(b *testing.B) {
 // BenchmarkCorpusValid is the cheapest full pass over a document: no tree, no
 // token materialization. It is the floor any parse path can aim at.
 func BenchmarkCorpusValid(b *testing.B) {
-	for _, d := range benchdata.Corpus() {
+	for _, d := range benchCorpus() {
 		b.Run(d.Name, func(b *testing.B) {
 			b.SetBytes(int64(len(d.JSON)))
 			for b.Loop() {
-				if !jsonlite.Valid(d.JSON) {
+				if !Valid(d.JSON) {
 					b.Fatal("invalid")
 				}
 			}
@@ -62,13 +57,13 @@ func BenchmarkCorpusValid(b *testing.B) {
 // separately and the per-document setup cost is paid many times over.
 func BenchmarkJSONLines(b *testing.B) {
 	const records = 1000
-	input := benchdata.JSONLines(records)
+	input := benchJSONLines(records)
 	b.Run("ParseSeq", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(len(input)))
 		for b.Loop() {
 			n := 0
-			for _, err := range jsonlite.ParseSeq(input) {
+			for _, err := range ParseSeq(input) {
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -82,7 +77,7 @@ func BenchmarkJSONLines(b *testing.B) {
 	b.Run("Iterate", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(len(input)))
-		it := jsonlite.Iterate(input)
+		it := Iterate(input)
 		for b.Loop() {
 			it.Reset(input)
 			for it.Next() {
@@ -99,11 +94,11 @@ func BenchmarkJSONLines(b *testing.B) {
 // so the two together separate the cost of producing keys from the cost of
 // walking structure.
 func BenchmarkCorpusIterateKeys(b *testing.B) {
-	for _, d := range benchdata.Corpus() {
+	for _, d := range benchCorpus() {
 		b.Run(d.Name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(d.JSON)))
-			it := jsonlite.Iterate(d.JSON)
+			it := Iterate(d.JSON)
 			var sink int
 			for b.Loop() {
 				it.Reset(d.JSON)
