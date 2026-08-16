@@ -2,6 +2,7 @@ package jsonlite_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/parquet-go/jsonlite"
@@ -420,18 +421,10 @@ func TestUnquoteUnpairedSurrogates(t *testing.T) {
 // mistake would only show at particular lengths and offsets: this walks every
 // length across both loop tiers and puts the escape at every position.
 func TestEscapedAgreesWithByteScan(t *testing.T) {
-	reference := func(s string) bool {
-		for i := range len(s) {
-			if c := s[i]; c < 0x20 || c == '\\' {
-				return true
-			}
-		}
-		return false
-	}
 	base := "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+-="
 	for n := 0; n <= 72; n++ {
 		clean := base[:n]
-		if got, want := jsonlite.EscapedForTest(clean), reference(clean); got != want {
+		if got, want := jsonlite.Escaped(clean), referenceEscaped(clean); got != want {
 			t.Errorf("len %d clean: got %v want %v", n, got, want)
 		}
 		for pos := range n {
@@ -439,7 +432,7 @@ func TestEscapedAgreesWithByteScan(t *testing.T) {
 				b := []byte(clean)
 				b[pos] = bad
 				s := string(b)
-				if got, want := jsonlite.EscapedForTest(s), reference(s); got != want {
+				if got, want := jsonlite.Escaped(s), referenceEscaped(s); got != want {
 					t.Errorf("len %d pos %d byte %#x: got %v want %v", n, pos, bad, got, want)
 				}
 			}
@@ -450,9 +443,48 @@ func TestEscapedAgreesWithByteScan(t *testing.T) {
 			b[n/2] = 0xC3
 			b[n/2+1] = 0xA9
 			s := string(b)
-			if got, want := jsonlite.EscapedForTest(s), reference(s); got != want {
+			if got, want := jsonlite.Escaped(s), referenceEscaped(s); got != want {
 				t.Errorf("len %d utf8: got %v want %v", n, got, want)
 			}
 		}
 	}
+}
+
+// TestEscapedWideAgreesWithPortable pins the vector scan against the
+// word-at-a-time one. It only does real work on a build where the vector
+// implementation exists, but it compiles and passes everywhere.
+func TestEscapedWideAgreesWithPortable(t *testing.T) {
+	if !jsonlite.EscapedHasWide() {
+		t.Skip("vector escape scan not built in")
+	}
+	base := strings.Repeat("abcdefghijklmnopqrstuvwxyz0123456789", 8)
+	for n := 0; n <= 200; n++ {
+		clean := base[:n]
+		if got, want := jsonlite.EscapedWide(clean), referenceEscaped(clean); got != want {
+			t.Fatalf("len %d clean: wide=%v reference=%v", n, got, want)
+		}
+		for _, pos := range []int{0, 1, 31, 32, 33, 63, 64, 65, n - 1} {
+			if pos < 0 || pos >= n {
+				continue
+			}
+			for _, bad := range []byte{'\\', 0x00, 0x1f, '\n', 0xC3, 0xFF} {
+				b := []byte(clean)
+				b[pos] = bad
+				s := string(b)
+				if got, want := jsonlite.EscapedWide(s), referenceEscaped(s); got != want {
+					t.Fatalf("len %d pos %d byte %#x: wide=%v reference=%v", n, pos, bad, got, want)
+				}
+			}
+		}
+	}
+}
+
+// referenceEscaped is the obvious byte loop the scans must agree with.
+func referenceEscaped(s string) bool {
+	for i := range len(s) {
+		if c := s[i]; c < 0x20 || c == '\\' {
+			return true
+		}
+	}
+	return false
 }

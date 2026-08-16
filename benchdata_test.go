@@ -44,6 +44,7 @@ func benchCorpus() []benchDoc {
 		{"numbers_int", benchNumbersInt(20000), "integer arrays; integer parsing dominates"},
 		{"strings_plain", benchStringsPlain(4000), "long ASCII strings, no escapes; fast unquote path"},
 		{"strings_escaped", benchStringsEscaped(4000), "quotes, backslashes and \\u escapes; slow unquote path"},
+		{"strings_long", benchStringsLong(400, 512), "512-byte text fields, the shape a log or comment payload has"},
 		{"pretty_printed", benchPretty(benchGitHubEvents(400)), "whitespace-heavy; stage 1 and the tokenizer must skip it"},
 		{"minified", benchGitHubEvents(400), "same shape as pretty_printed with no whitespace"},
 		{"tiny", `{"id":1,"ok":true}`, "below indexedParseThreshold; the scalar path always wins here"},
@@ -314,4 +315,27 @@ func TestBenchCorpusIsValidJSON(t *testing.T) {
 			t.Errorf("sized record %d: invalid JSON: %v", size, err)
 		}
 	}
+}
+
+// benchStringsLong builds records whose string values are long, the shape a
+// log line, comment body or embedded blob has. The other string documents
+// hold values of a few tens of bytes, which leaves the behaviour of the scan
+// on long strings unmeasured.
+func benchStringsLong(n, size int) string {
+	r := benchRand()
+	var b strings.Builder
+	b.WriteString(`{"records":[`)
+	for i := range n {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		var text strings.Builder
+		for text.Len() < size {
+			text.WriteString(benchSentence(r, 8))
+			text.WriteByte(' ')
+		}
+		fmt.Fprintf(&b, `{"id":%d,"message":"%s"}`, i, text.String()[:size])
+	}
+	b.WriteString(`]}`)
+	return b.String()
 }

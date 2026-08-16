@@ -40,7 +40,19 @@ func AppendUnquote(b []byte, s string) ([]byte, error) {
 	return unquote(b, s)
 }
 
+// escaped reports whether s needs unescaping: it contains a backslash or a
+// raw control character. Strings are the bulk of a JSON document, so this
+// runs over most of the input.
+//
+// The word-at-a-time scan lives here rather than behind a second call. A
+// dispatching wrapper that called out to it cost 2-4% across the corpus,
+// because every string in a document pays that call and almost all of them
+// are too short to reach the vector path anyway.
 func escaped(s string) bool {
+	if len(s) >= 64 && escapedHasWide() {
+		return escapedWide(s)
+	}
+
 	// Word-at-a-time scan for a backslash or a control character.
 	//
 	// Strings are the bulk of a JSON document, so this loop runs over most of
@@ -59,8 +71,7 @@ func escaped(s string) bool {
 		// Entered only at 32 bytes and above. Below that the setup costs
 		// more than it saves -- keys and short values are most of the strings
 		// in a document, and routing them through here cost 2-9%.
-		b := unsafecast.Bytes(s)
-		blocks := unsafecast.Slice[[4]uint64](b)
+		blocks := unsafecast.Slice[[4]uint64](unsafecast.Bytes(s))
 		for bi := range blocks {
 			w := &blocks[bi]
 			m0 := (below(w[0], 0x20) | contains(w[0], '\\')) &^ w[0]
