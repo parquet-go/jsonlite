@@ -6,7 +6,8 @@ import (
 	"iter"
 	"strings"
 	"sync"
-	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 const (
@@ -443,7 +444,7 @@ func parseObject(start, json string, maxDepth int, p *parser) (Value, string, er
 				for i := range fields {
 					hashes[i] = hashKey(fields[i].k)
 				}
-				result[0].k = unsafe.String(unsafe.SliceData(hashes), n)
+				result[0].k = unsafecast.String(hashes)
 			}
 
 			result[0].v = makeStringValue(cached)

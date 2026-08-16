@@ -2,7 +2,8 @@ package jsonlite
 
 import (
 	"math/bits"
-	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 // Quote returns s as a JSON quoted string.
@@ -84,7 +85,7 @@ const (
 func escapeIndex(s string) int {
 	var i int
 	if len(s) >= 8 {
-		chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
+		chunks := unsafecast.Slice[uint64](stringBytes(s))
 		for j, n := range chunks {
 			// The bit tricks in below/contains only yield correct results for
 			// bytes < 0x80, so we mask out high bytes with `^n & msb` before

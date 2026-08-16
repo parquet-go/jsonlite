@@ -6,7 +6,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
-	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 // Unquote removes quotes from a JSON string and processes escape sequences.
@@ -45,7 +46,7 @@ func escaped(s string) bool {
 	// so we also check for high bytes and fall back to byte-by-byte.
 	var i int
 	if len(s) >= 8 {
-		chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
+		chunks := unsafecast.Slice[uint64](stringBytes(s))
 		for _, n := range chunks {
 			// Check for backslash or control chars. High bytes (>= 0x80)
 			// are masked out with `&^ n` (see escapeIndex): UTF-8 sequences
@@ -77,7 +78,7 @@ func unescapeIndex(s string) int {
 	// so we also check for high bytes and fall back to byte-by-byte.
 	var i int
 	if len(s) >= 8 {
-		chunks := unsafe.Slice((*uint64)(unsafe.Pointer(unsafe.StringData(s))), len(s)/8)
+		chunks := unsafecast.Slice[uint64](stringBytes(s))
 		for j, n := range chunks {
 			// Check for high bytes (>= 0x80), backslash, or control chars
 			mask := n | below(n, 0x20) | contains(n, '\\')

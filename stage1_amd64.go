@@ -4,7 +4,6 @@ package jsonlite
 
 import (
 	"simd/archsimd"
-	"unsafe"
 
 	"github.com/parquet-go/bitpack/unsafecast"
 )
@@ -71,7 +70,7 @@ func structuralIndexAVX2(s string, index []uint32) ([]uint32, stage1Flags, error
 	ws := archsimd.LoadUint8x32(&wsTable)
 	op := archsimd.LoadUint8x32(&opTable)
 
-	buf := unsafe.Slice(unsafe.StringData(s), len(s))
+	buf := stringBytes(s)
 	blocks := unsafecast.Slice[[64]byte](buf)
 	for bi := range blocks {
 		b := &blocks[bi]

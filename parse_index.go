@@ -2,7 +2,8 @@ package jsonlite
 
 import (
 	"fmt"
-	"unsafe"
+
+	"github.com/parquet-go/bitpack/unsafecast"
 )
 
 // This file implements "stage 2": a recursive-descent parser that consumes
@@ -261,7 +262,7 @@ func parseIndexedObject(c *indexCursor, start, maxDepth int, p *parser) (Value, 
 				for i := range fields {
 					hashes[i] = hashKey(fields[i].k)
 				}
-				result[0].k = unsafe.String(unsafe.SliceData(hashes), n)
+				result[0].k = unsafecast.String(hashes)
 			}
 
 			result[0].v = makeStringValue(cached)
