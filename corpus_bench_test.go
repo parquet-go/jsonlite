@@ -93,3 +93,28 @@ func BenchmarkJSONLines(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkCorpusIterateKeys walks each document and reads every key, which
+// is what a real consumer does. BenchmarkCorpusIterate never touches Key(),
+// so the two together separate the cost of producing keys from the cost of
+// walking structure.
+func BenchmarkCorpusIterateKeys(b *testing.B) {
+	for _, d := range benchdata.Corpus() {
+		b.Run(d.Name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(d.JSON)))
+			it := jsonlite.Iterate(d.JSON)
+			var sink int
+			for b.Loop() {
+				it.Reset(d.JSON)
+				for it.Next() {
+					sink += len(it.Key())
+				}
+			}
+			if err := it.Err(); err != nil {
+				b.Fatal(err)
+			}
+			_ = sink
+		})
+	}
+}
