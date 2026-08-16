@@ -41,22 +41,48 @@ func AppendUnquote(b []byte, s string) ([]byte, error) {
 }
 
 func escaped(s string) bool {
-	// SIMD-like scanning for backslash or control characters.
-	// The bit tricks only work correctly when all bytes are < 0x80,
-	// so we also check for high bytes and fall back to byte-by-byte.
+	// Word-at-a-time scan for a backslash or a control character.
+	//
+	// Strings are the bulk of a JSON document, so this loop runs over most of
+	// the input. The bit tricks only work on bytes below 0x80, so high bytes
+	// are masked out with `&^ n`: UTF-8 sequences never need unescaping and
+	// must not trigger the slow path.
 	var i int
-	if len(s) >= 8 {
-		chunks := unsafecast.Slice[uint64](unsafecast.Bytes(s))
+
+	if len(s) >= 32 {
+		// Wide tier. Four words are folded together before the mask is
+		// tested, which gives the loads room to overlap, and the cast to
+		// [][4]uint64 rather than []uint64 means the four loads index a
+		// fixed-size array: one bounds check on the block instead of four
+		// inside the body. Same reason stage 1 walks [][64]byte.
+		//
+		// Entered only at 32 bytes and above. Below that the setup costs
+		// more than it saves -- keys and short values are most of the strings
+		// in a document, and routing them through here cost 2-9%.
+		b := unsafecast.Bytes(s)
+		blocks := unsafecast.Slice[[4]uint64](b)
+		for bi := range blocks {
+			w := &blocks[bi]
+			m0 := (below(w[0], 0x20) | contains(w[0], '\\')) &^ w[0]
+			m1 := (below(w[1], 0x20) | contains(w[1], '\\')) &^ w[1]
+			m2 := (below(w[2], 0x20) | contains(w[2], '\\')) &^ w[2]
+			m3 := (below(w[3], 0x20) | contains(w[3], '\\')) &^ w[3]
+			if ((m0|m1)|(m2|m3))&msb != 0 {
+				return true
+			}
+		}
+		i = len(blocks) * 32
+	}
+
+	if len(s)-i >= 8 {
+		chunks := unsafecast.Slice[uint64](unsafecast.Bytes(s[i:]))
 		for _, n := range chunks {
-			// Check for backslash or control chars. High bytes (>= 0x80)
-			// are masked out with `&^ n` (see escapeIndex): UTF-8 sequences
-			// never need unescaping, so they must not trigger the slow path.
 			mask := (below(n, 0x20) | contains(n, '\\')) &^ n
 			if (mask & msb) != 0 {
 				return true
 			}
 		}
-		i = len(chunks) * 8
+		i += len(chunks) * 8
 	}
 
 	for ; i < len(s); i++ {

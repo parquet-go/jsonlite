@@ -414,3 +414,45 @@ func TestUnquoteUnpairedSurrogates(t *testing.T) {
 		})
 	}
 }
+
+// TestEscapedAgreesWithByteScan pins the word-at-a-time scan against a plain
+// byte loop. The unrolled path folds four words together before testing, so a
+// mistake would only show at particular lengths and offsets: this walks every
+// length across both loop tiers and puts the escape at every position.
+func TestEscapedAgreesWithByteScan(t *testing.T) {
+	reference := func(s string) bool {
+		for i := range len(s) {
+			if c := s[i]; c < 0x20 || c == '\\' {
+				return true
+			}
+		}
+		return false
+	}
+	base := "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+-="
+	for n := 0; n <= 72; n++ {
+		clean := base[:n]
+		if got, want := jsonlite.EscapedForTest(clean), reference(clean); got != want {
+			t.Errorf("len %d clean: got %v want %v", n, got, want)
+		}
+		for pos := range n {
+			for _, bad := range []byte{'\\', 0x00, 0x1f, '\t', '\n'} {
+				b := []byte(clean)
+				b[pos] = bad
+				s := string(b)
+				if got, want := jsonlite.EscapedForTest(s), reference(s); got != want {
+					t.Errorf("len %d pos %d byte %#x: got %v want %v", n, pos, bad, got, want)
+				}
+			}
+		}
+		// High bytes must not trigger the slow path.
+		if n >= 4 {
+			b := []byte(clean)
+			b[n/2] = 0xC3
+			b[n/2+1] = 0xA9
+			s := string(b)
+			if got, want := jsonlite.EscapedForTest(s), reference(s); got != want {
+				t.Errorf("len %d utf8: got %v want %v", n, got, want)
+			}
+		}
+	}
+}
