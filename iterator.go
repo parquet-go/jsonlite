@@ -11,25 +11,17 @@ import (
 // It automatically handles control tokens (braces, brackets, colons, commas)
 // and presents only the logical JSON values to the caller.
 type Iterator struct {
-	tokens Tokenizer
-	json   string // Original JSON for computing pre-token positions
-	token  string
-	kind   Kind
-	// key holds the decoded key once keyDecoded is set, and the still-quoted
-	// token before that. Decoding is deferred to Key() so a walk that never
-	// reads keys does not pay to unescape them; on objects with long keys that
-	// scan is a fifth of the walk. Sharing the field with the raw token keeps
-	// Iterator the same size, which short-key documents are sensitive to.
-	key        string
-	keyDecoded bool
-	err        error
-	state      []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
-	consumed   bool   // whether the current value has been consumed
+	tokens   Tokenizer
+	json     string // Original JSON for computing pre-token positions
+	token    string
+	kind     Kind
+	key      string
+	err      error
+	state    []byte // stack of states: 'a' for array, 'o' for object (expecting key), 'v' for object (expecting value)
+	consumed bool   // whether the current value has been consumed
 	// bytes backs state inline. One byte per open container, so this covers
 	// documents up to 64 deep without allocating; beyond that state grows on
 	// the heap, which is the only allocation a walk would otherwise perform.
-	// Widening it from 16 costs nothing measurable, including on shallow
-	// documents that never use more than a few entries.
 	bytes [64]byte
 }
 
@@ -38,8 +30,6 @@ func Iterate(json string) *Iterator {
 	it := &Iterator{
 		tokens: Tokenizer{json: json},
 		json:   json, // Store original JSON
-		// No key until an object supplies one, and "" needs no decoding.
-		keyDecoded: true,
 	}
 	it.state = it.bytes[:0]
 	return it
@@ -52,7 +42,6 @@ func (it *Iterator) Reset(json string) {
 	it.token = ""
 	it.kind = 0
 	it.key = ""
-	it.keyDecoded = true
 	it.err = nil
 	it.state = it.bytes[:0]
 	it.consumed = false
@@ -93,11 +82,12 @@ func (it *Iterator) Next() bool {
 				if token == "," {
 					continue
 				}
-				if !validQuoted(token) {
-					it.setErrorf("invalid key: %q", token)
+				key, err := Unquote(token)
+				if err != nil {
+					it.setErrorf("invalid key: %q: %w", token, err)
 					return false
 				}
-				it.setRawKey(token)
+				it.setKey(key)
 				colon, ok := it.tokens.Next()
 				if !ok {
 					it.err = errUnexpectedEndOfObject
@@ -146,13 +136,6 @@ func (it *Iterator) setErrorf(msg string, args ...any) {
 
 func (it *Iterator) setKey(key string) {
 	it.key = key
-	it.keyDecoded = true
-}
-
-// setRawKey records a key without decoding it; Key() decodes on demand.
-func (it *Iterator) setRawKey(token string) {
-	it.key = token
-	it.keyDecoded = false
 }
 
 func (it *Iterator) setToken(token string) bool {
@@ -250,19 +233,7 @@ func (it *Iterator) Kind() Kind { return it.kind }
 
 // Key returns the object key for the current value, if inside an object.
 // Returns an empty string if not inside an object or at the top level.
-func (it *Iterator) Key() string {
-	if !it.keyDecoded {
-		it.keyDecoded = true
-		key, err := Unquote(it.key)
-		if err != nil {
-			it.setErrorf("invalid key: %q: %w", it.key, err)
-			it.key = ""
-			return ""
-		}
-		it.key = key
-	}
-	return it.key
-}
+func (it *Iterator) Key() string { return it.key }
 
 // Err returns any error that occurred during iteration.
 func (it *Iterator) Err() error { return it.err }
@@ -622,10 +593,4 @@ func (it *Iterator) Array(yield func(int, error) bool) {
 			return
 		}
 	}
-}
-
-// validQuoted reports whether s is delimited as a JSON string. It is the
-// cheap half of Unquote's checks; the escape scan is left to Key().
-func validQuoted(s string) bool {
-	return len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"'
 }
