@@ -1,4 +1,4 @@
-//go:build !(goexperiment.simd && amd64 && !go1.27)
+//go:build !(goexperiment.simd && amd64)
 
 package jsonlite
 
