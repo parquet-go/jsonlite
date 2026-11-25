@@ -28,18 +28,23 @@ const (
 // current one cannot fit them. Requests larger than a full block get an
 // exact-size block of their own.
 //
+// remain is the number of input bytes still unparsed after the container
+// being placed. See arenaBlockSize for how it bounds the new block.
+//
 // The returned slice is full (len == cap), so a caller appending to it cannot
 // reach into the next allocation's elements.
-func arenaAlloc[T any](block *[]T, n, minSize, maxSize int) []T {
+func arenaAlloc[T any](block *[]T, n, minSize, maxSize, remain int) []T {
 	b := *block
 	if n > cap(b)-len(b) {
-		// The first block of a parse is sized exactly, so a document holding a
-		// single small container allocates no more than it would have without
-		// an arena. Blocks only start growing once a parse has shown it has
-		// more than one container to place, which is when amortizing pays.
+		// Same decision as arenaBlockSize, written out so this stays under
+		// the inliner budget and can be inlined into the noinline wrappers
+		// below. A call here would be a second call per container.
 		grown := n
 		if cap(b) != 0 {
 			grown = min(max(cap(b)*2, minSize), maxSize)
+			if remain < 2 {
+				grown = n
+			}
 		}
 		b = make([]T, 0, max(n, grown))
 	}
@@ -49,19 +54,47 @@ func arenaAlloc[T any](block *[]T, n, minSize, maxSize int) []T {
 	return b[off : off+n : off+n]
 }
 
-// allocTags returns n bytes of storage for an object's hash index. The bytes
-// are never written again once filled, which is what makes it safe to alias
-// the result as an immutable string.
-func (p *parser) allocTags(n int) []byte {
-	return arenaAlloc(&p.tags, n, tagBlockMin, tagBlockMax)
+// arenaBlockSize is the capacity of a fresh block serving a request for n
+// elements. prev is the capacity of the block that just ran out (zero when
+// this is the first block of the parse).
+//
+// The first block is sized exactly, so a document holding a single small
+// container allocates no more than it would have without an arena. Later
+// blocks grow geometrically between minSize and maxSize, which is what
+// amortizes a long run of small containers. Growth is skipped when fewer
+// than two bytes of input remain: that is not enough to start another value
+// (a single digit is one byte, a closing bracket is one), so the block is
+// the request itself. Without that, a nested object that exactly fills the
+// first block -- allocFields(7+1) for a 7-field http object -- forces its
+// parent into a doubled block, 16 slots for a 5-slot object, 24 field slots
+// where 13 suffice.
+func arenaBlockSize(n, prev, minSize, maxSize, remain int) int {
+	if prev <= 0 {
+		return n
+	}
+	grown := min(max(prev*2, minSize), maxSize)
+	if remain < 2 || grown < n {
+		return n
+	}
+	return grown
 }
 
-// allocValues returns storage for a completed array's elements.
-func (p *parser) allocValues(n int) []Value {
-	return arenaAlloc(&p.valueBlock, n, valueBlockMin, valueBlockMax)
+// The alloc methods are marked noinline. Inlining arenaAlloc into
+// parseArray and parseObject makes those functions large enough that the
+// element loop loses registers, which costs more than the call on a document
+// of many small containers. The call is one per container, not one per element.
+//
+//go:noinline
+func (p *parser) allocTags(n, remain int) []byte {
+	return arenaAlloc(&p.tags, n, tagBlockMin, tagBlockMax, remain)
 }
 
-// allocFields returns storage for a completed object's fields.
-func (p *parser) allocFields(n int) []field {
-	return arenaAlloc(&p.fieldBlock, n, fieldBlockMin, fieldBlockMax)
+//go:noinline
+func (p *parser) allocValues(n, remain int) []Value {
+	return arenaAlloc(&p.valueBlock, n, valueBlockMin, valueBlockMax, remain)
+}
+
+//go:noinline
+func (p *parser) allocFields(n, remain int) []field {
+	return arenaAlloc(&p.fieldBlock, n, fieldBlockMin, fieldBlockMax, remain)
 }
