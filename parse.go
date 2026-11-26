@@ -346,7 +346,7 @@ func (p *parser) parseArray(start, json string, maxDepth int) (Value, string, er
 			}
 			if token == "]" {
 				cached := start[:len(start)-len(rest)]
-				result := p.allocValues(len(p.values) - base + 1)
+				result := p.allocValues(len(p.values)-base+1, len(rest))
 				result[0] = makeStringValue(cached)
 				copy(result[1:], p.values[base:])
 				p.maxValues = max(p.maxValues, len(p.values))
@@ -373,7 +373,7 @@ func (p *parser) parseArray(start, json string, maxDepth int) (Value, string, er
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
 				cached := start[:len(start)-len(rest)]
-				result := p.allocValues(1)
+				result := p.allocValues(1, len(rest))
 				result[0] = makeStringValue(cached)
 				return makeArrayValue(result), rest, nil
 			}
@@ -441,14 +441,14 @@ func (p *parser) parseObject(start, json string, maxDepth int) (Value, string, e
 		if token == "}" {
 			cached := start[:len(start)-len(rest)]
 			n := len(p.fields) - base
-			result := p.allocFields(n + 1)
+			result := p.allocFields(n+1, len(rest))
 			copy(result[1:], p.fields[base:])
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]
 
 			fields := result[1:]
 			if n > smallObjectFields {
-				hashes := p.allocTags(n)
+				hashes := p.allocTags(n, len(rest))
 				for i := range fields {
 					hashes[i] = hashKey(fields[i].k)
 				}

@@ -170,7 +170,7 @@ func (p *parser) parseIndexedArray(c *indexCursor, start, maxDepth int) (Value, 
 			if c.s[j] == ']' {
 				c.pos++
 				cached := c.s[start : j+1]
-				result := p.allocValues(len(p.values) - base + 1)
+				result := p.allocValues(len(p.values)-base+1, len(c.s)-int(j)-1)
 				result[0] = makeStringValue(cached)
 				copy(result[1:], p.values[base:])
 				p.maxValues = max(p.maxValues, len(p.values))
@@ -196,8 +196,9 @@ func (p *parser) parseIndexedArray(c *indexCursor, start, maxDepth int) (Value, 
 		p.depth--
 		if err != nil {
 			if i == 0 && err == errEndOfArray {
-				cached := c.s[start : int(c.index[c.pos-1])+1]
-				result := p.allocValues(1)
+				end := int(c.index[c.pos-1]) + 1
+				cached := c.s[start:end]
+				result := p.allocValues(1, len(c.s)-end)
 				result[0] = makeStringValue(cached)
 				return makeArrayValue(result), nil
 			}
@@ -252,14 +253,14 @@ func (p *parser) parseIndexedObject(c *indexCursor, start, maxDepth int) (Value,
 			c.pos++
 			cached := c.s[start : j+1]
 			n := len(p.fields) - base
-			result := p.allocFields(n + 1)
+			result := p.allocFields(n+1, len(c.s)-int(j)-1)
 			copy(result[1:], p.fields[base:])
 			p.maxFields = max(p.maxFields, len(p.fields))
 			p.fields = p.fields[:base]
 
 			fields := result[1:]
 			if n > smallObjectFields {
-				hashes := p.allocTags(n)
+				hashes := p.allocTags(n, len(c.s)-int(j)-1)
 				for i := range fields {
 					hashes[i] = hashKey(fields[i].k)
 				}
